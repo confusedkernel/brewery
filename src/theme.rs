@@ -1,72 +1,78 @@
 use ratatui::style::Color;
 
-// Theme struct to hold all colors
 #[derive(Clone, Copy)]
 pub struct Theme {
-    // Primary accents
-    pub amber: Color,
-    pub copper: Color,
-    pub dark_amber: Color,
+    // Primary
+    pub accent: Color,
+    pub accent_secondary: Color,
+    pub green: Color,
+    pub yellow: Color,
+    pub red: Color,
+    pub orange: Color,
 
     // Text colors
-    pub hop_green: Color,
     pub text_primary: Color,
     pub text_secondary: Color,
+    pub text_muted: Color,
 
     // Backgrounds
     pub bg_main: Color,
     pub bg_panel: Color,
-    pub bg_header: Color,
+    pub bg_selection: Color,
+    pub bg_dim: Color,
 
-    // Accents
-    pub text_on_accent: Color,
+    // UI elements
     pub border: Color,
+    pub border_active: Color,
+    pub text_on_accent: Color,
 }
 
 impl Theme {
     pub fn light() -> Self {
         Self {
-            // Primary accents - same for both
-            amber: Color::Rgb(212, 145, 40),
-            copper: Color::Rgb(166, 100, 50),
-            dark_amber: Color::Rgb(140, 90, 45),
+            accent: Color::Rgb(180, 130, 60),
+            accent_secondary: Color::Rgb(150, 100, 65),
+            green: Color::Rgb(100, 140, 80),
+            yellow: Color::Rgb(190, 160, 100),
+            red: Color::Rgb(180, 100, 90),
+            orange: Color::Rgb(175, 125, 80),
 
-            // Text - dark on light
-            hop_green: Color::Rgb(76, 132, 60),
-            text_primary: Color::Rgb(70, 50, 35),
-            text_secondary: Color::Rgb(120, 90, 60),
+            text_primary: Color::Rgb(60, 50, 40),
+            text_secondary: Color::Rgb(110, 95, 80),
+            text_muted: Color::Rgb(150, 135, 120),
 
-            // Light backgrounds
-            bg_main: Color::Rgb(255, 250, 240),
-            bg_panel: Color::Rgb(250, 240, 220),
-            bg_header: Color::Rgb(255, 248, 230),
+            bg_main: Color::Rgb(252, 249, 242),
+            bg_panel: Color::Rgb(248, 244, 235),
+            bg_selection: Color::Rgb(230, 220, 200),
+            bg_dim: Color::Rgb(180, 175, 165),
 
-            // Accents
-            text_on_accent: Color::Rgb(255, 255, 255),
-            border: Color::Rgb(180, 150, 120),
+            border: Color::Rgb(200, 185, 165),
+            border_active: Color::Rgb(180, 130, 60),
+            text_on_accent: Color::Rgb(255, 252, 245),
         }
     }
 
     pub fn dark() -> Self {
         Self {
-            // Primary accents - slightly brighter for dark mode
-            amber: Color::Rgb(255, 191, 0),
-            copper: Color::Rgb(205, 133, 63),
-            dark_amber: Color::Rgb(184, 134, 11),
+            accent: Color::Rgb(200, 155, 80),
+            accent_secondary: Color::Rgb(175, 120, 75),
+            green: Color::Rgb(130, 165, 95),
+            yellow: Color::Rgb(195, 165, 105),
+            red: Color::Rgb(185, 110, 100),
+            orange: Color::Rgb(180, 130, 85),
 
-            // Text - light on dark
-            hop_green: Color::Rgb(124, 179, 66),
-            text_primary: Color::Rgb(245, 235, 220),
-            text_secondary: Color::Rgb(200, 180, 160),
+            text_primary: Color::Rgb(210, 200, 185),
+            text_secondary: Color::Rgb(145, 135, 120),
+            text_muted: Color::Rgb(105, 95, 85),
 
-            // Dark backgrounds
-            bg_main: Color::Rgb(30, 22, 16),
-            bg_panel: Color::Rgb(45, 32, 22),
-            bg_header: Color::Rgb(38, 28, 20),
+            bg_main: Color::Rgb(30, 26, 22),
+            bg_panel: Color::Rgb(38, 33, 28),
+            bg_selection: Color::Rgb(60, 52, 45),
+            bg_dim: Color::Rgb(18, 15, 12),
 
-            // Accents
-            text_on_accent: Color::Rgb(25, 18, 12),
-            border: Color::Rgb(100, 75, 55),
+            border: Color::Rgb(65, 58, 50),
+            border_active: Color::Rgb(200, 155, 80),
+            text_on_accent: Color::Rgb(30, 26, 22),
         }
     }
 }
@@ -80,7 +86,6 @@ pub enum ThemeMode {
 
 pub fn detect_system_theme() -> Theme {
     // Check COLORFGBG env var (set by many terminals)
-    // Format: "fg;bg" where bg > 7 typically means dark background
     if let Ok(colorfgbg) = std::env::var("COLORFGBG") {
         if let Some(bg) = colorfgbg.split(';').last() {
             if let Ok(bg_num) = bg.parse::<u8>() {
@@ -95,12 +100,10 @@ pub fn detect_system_theme() -> Theme {
     // Check for common dark mode indicators
     if let Ok(term) = std::env::var("TERM_PROGRAM") {
         let term_lower = term.to_lowercase();
-        // Many modern terminals default to dark
         if term_lower.contains("iterm")
             || term_lower.contains("alacritty")
             || term_lower.contains("kitty")
         {
-            // Check if there's a theme preference
             if let Ok(appearance) = std::env::var("TERM_PROGRAM_VERSION") {
                 if appearance.contains("light") {
                     return Theme::light();
@@ -122,12 +125,9 @@ pub fn detect_system_theme() -> Theme {
                     return Theme::dark();
                 }
             }
-            // If command succeeds but no "Dark", it's light mode
-            // If command fails, key doesn't exist = light mode
             return Theme::light();
         }
     }
 
-    // Default to dark (more common in terminals)
     Theme::dark()
 }

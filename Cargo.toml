@@ -2,6 +2,12 @@
 name = "brewery"
 version = "0.1.0"
 edition = "2024"
+description = "A fast, friendly TUI for Homebrew"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/placeholder/brewery"
+homepage = "https://github.com/placeholder/brewery"
+documentation = "https://github.com/placeholder/brewery"
 
 [dependencies]
 anyhow = "1.0"

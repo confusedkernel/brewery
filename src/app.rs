@@ -4,8 +4,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::brew::{
-    fetch_details_basic, fetch_details_full, fetch_leaves, fetch_sizes, run_brew_command,
-    CommandMessage, Details, DetailsLoad, DetailsMessage, SizeEntry, SizesMessage,
+    fetch_details_basic, fetch_details_full, fetch_health, fetch_leaves, fetch_sizes,
+    run_brew_command, CommandMessage, Details, DetailsLoad, DetailsMessage, HealthMessage,
+    HealthStatus, SizeEntry, SizesMessage,
 };
 use crate::theme::{detect_system_theme, Theme, ThemeMode};
 
@@ -19,6 +20,7 @@ pub struct App {
     pub leaves_query: String,
     pub package_query: String,
     pub leaves: Vec<String>,
+    pub filtered_leaves: Vec<usize>,
     pub selected_index: Option<usize>,
     pub details_cache: HashMap<String, Details>,
     pub pending_details: Option<String>,
@@ -26,6 +28,8 @@ pub struct App {
     pub view_mode: ViewMode,
     pub sizes: Vec<SizeEntry>,
     pub pending_sizes: bool,
+    pub icon_mode: IconMode,
+    pub icons_ascii: bool,
     pub pending_command: bool,
     pub last_command: Option<String>,
     pub last_command_output: Vec<String>,
@@ -33,6 +37,16 @@ pub struct App {
     pub last_error: Option<String>,
     pub last_leaves_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
+    pub focus_panel: FocusedPanel,
+    pub sizes_scroll_offset: usize,
+    pub details_scroll_offset: usize,
+    pub health_scroll_offset: usize,
+    pub health: Option<HealthStatus>,
+    pub pending_health: bool,
+    pub last_health_check: Option<Instant>,
+    pub health_tab: HealthTab,
+    pub show_help_popup: bool,
+    pub help_scroll_offset: usize,
 }
 
 impl App {
@@ -48,6 +62,7 @@ impl App {
             leaves_query: String::new(),
             package_query: String::new(),
             leaves: Vec::new(),
+            filtered_leaves: Vec::new(),
             selected_index: Some(0),
             details_cache: HashMap::new(),
             pending_details: None,
@@ -55,6 +70,8 @@ impl App {
             view_mode: ViewMode::Details,
             sizes: Vec::new(),
             pending_sizes: false,
+            icon_mode: IconMode::Auto,
+            icons_ascii: detect_icon_ascii(),
             pending_command: false,
             last_command: None,
             last_command_output: Vec::new(),
@@ -62,6 +79,16 @@ impl App {
             last_error: None,
             last_leaves_refresh: None,
             last_sizes_refresh: None,
+            focus_panel: FocusedPanel::Leaves,
+            sizes_scroll_offset: 0,
+            details_scroll_offset: 0,
+            health_scroll_offset: 0,
+            health: None,
+            pending_health: false,
+            last_health_check: None,
+            health_tab: HealthTab::default(),
+            show_help_popup: false,
+            help_scroll_offset: 0,
         }
     }
 
@@ -87,11 +114,110 @@ impl App {
         self.last_refresh = Instant::now();
     }
 
+    pub fn toggle_icons(&mut self) {
+        self.icon_mode = match self.icon_mode {
+            IconMode::Auto => IconMode::Ascii,
+            IconMode::Ascii => IconMode::Nerd,
+            IconMode::Nerd => IconMode::Ascii,
+        };
+        self.icons_ascii = match self.icon_mode {
+            IconMode::Ascii => true,
+            IconMode::Nerd => false,
+            IconMode::Auto => detect_icon_ascii(),
+        };
+        self.status = format!(
+            "Icons: {}",
+            if self.icons_ascii { "ASCII" } else { "Nerd" }
+        );
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn cycle_focus(&mut self) {
+        self.focus_panel = match self.focus_panel {
+            FocusedPanel::Leaves => FocusedPanel::Sizes,
+            FocusedPanel::Sizes => FocusedPanel::Health,
+            FocusedPanel::Health => FocusedPanel::Details,
+            FocusedPanel::Details => FocusedPanel::Leaves,
+        };
+        self.status = format!("Focus: {:?}", self.focus_panel);
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn health_tab_next(&mut self) {
+        self.health_tab = match self.health_tab {
+            HealthTab::Activity => HealthTab::Errors,
+            HealthTab::Errors => HealthTab::Outdated,
+            HealthTab::Outdated => HealthTab::Activity,
+        };
+        self.health_scroll_offset = 0; // Reset scroll when switching tabs
+    }
+
+    pub fn health_tab_prev(&mut self) {
+        self.health_tab = match self.health_tab {
+            HealthTab::Activity => HealthTab::Outdated,
+            HealthTab::Errors => HealthTab::Activity,
+            HealthTab::Outdated => HealthTab::Errors,
+        };
+        self.health_scroll_offset = 0;
+    }
+
+    pub fn toggle_help(&mut self) {
+        self.show_help_popup = !self.show_help_popup;
+        self.help_scroll_offset = 0;
+    }
+
+    pub fn scroll_focused_up(&mut self) {
+        match self.focus_panel {
+            FocusedPanel::Leaves => self.select_prev(),
+            FocusedPanel::Sizes => {
+                self.sizes_scroll_offset = self.sizes_scroll_offset.saturating_sub(1);
+            }
+            FocusedPanel::Health => {
+                self.health_scroll_offset = self.health_scroll_offset.saturating_sub(1);
+            }
+            FocusedPanel::Details => {
+                self.details_scroll_offset = self.details_scroll_offset.saturating_sub(1);
+            }
+        }
+    }
+
+    pub fn scroll_focused_down(&mut self) {
+        match self.focus_panel {
+            FocusedPanel::Leaves => self.select_next(),
+            FocusedPanel::Sizes => {
+                let max_scroll = self.sizes.len().saturating_sub(1);
+                self.sizes_scroll_offset = (self.sizes_scroll_offset + 1).min(max_scroll);
+            }
+            FocusedPanel::Health => {
+                let max_scroll = self.max_health_scroll();
+                self.health_scroll_offset = (self.health_scroll_offset + 1).min(max_scroll);
+            }
+            FocusedPanel::Details => {
+                self.details_scroll_offset += 1;
+            }
+        }
+    }
+
+    fn max_health_scroll(&self) -> usize {
+        self.health
+            .as_ref()
+            .map(|h| {
+                let count = match self.health_tab {
+                    HealthTab::Outdated => h.outdated_packages.len(),
+                    HealthTab::Errors => h.doctor_issues.len(),
+                    HealthTab::Activity => 7, // Fixed number of activity items
+                };
+                count.saturating_sub(2)
+            })
+            .unwrap_or(0)
+    }
+
     pub fn refresh_leaves(&mut self) {
         match fetch_leaves() {
             Ok(mut leaves) => {
                 leaves.sort();
                 self.leaves = leaves;
+                self.update_filtered_leaves();
                 if self.leaves.is_empty() {
                     self.selected_index = None;
                 } else if self
@@ -114,21 +240,26 @@ impl App {
     }
 
     pub fn filtered_leaves(&self) -> Vec<(usize, &str)> {
+        self.filtered_leaves
+            .iter()
+            .filter_map(|idx| self.leaves.get(*idx).map(|item| (*idx, item.as_str())))
+            .collect()
+    }
+
+    pub fn update_filtered_leaves(&mut self) {
         if self.leaves_query.is_empty() {
-            return self
-                .leaves
-                .iter()
-                .enumerate()
-                .map(|(idx, item)| (idx, item.as_str()))
-                .collect();
+            self.filtered_leaves = (0..self.leaves.len()).collect();
+            return;
         }
+
         let needle = self.leaves_query.to_lowercase();
-        self.leaves
+        self.filtered_leaves = self
+            .leaves
             .iter()
             .enumerate()
             .filter(|(_, item)| item.to_lowercase().contains(&needle))
-            .map(|(idx, item)| (idx, item.as_str()))
-            .collect()
+            .map(|(idx, _)| idx)
+            .collect();
     }
 
     pub fn selected_leaf(&self) -> Option<&str> {
@@ -237,7 +368,7 @@ impl App {
 
         let tx = tx.clone();
         tokio::spawn(async move {
-            let result = fetch_sizes(12).await;
+            let result = fetch_sizes().await;
             let _ = tx.send(SizesMessage { result });
         });
     }
@@ -246,6 +377,12 @@ impl App {
         match message.result {
             Ok(sizes) => {
                 self.sizes = sizes;
+                if self.sizes.is_empty() {
+                    self.sizes_scroll_offset = 0;
+                } else {
+                    let max_scroll = self.sizes.len().saturating_sub(1);
+                    self.sizes_scroll_offset = self.sizes_scroll_offset.min(max_scroll);
+                }
                 self.last_error = None;
                 self.status = "Sizes updated".to_string();
                 self.last_sizes_refresh = Some(Instant::now());
@@ -257,6 +394,42 @@ impl App {
         }
 
         self.pending_sizes = false;
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn request_health(&mut self, tx: &mpsc::UnboundedSender<HealthMessage>) {
+        if self.pending_health {
+            return;
+        }
+
+        self.pending_health = true;
+        self.status = "Checking health...".to_string();
+        self.last_refresh = Instant::now();
+
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let result = fetch_health().await;
+            let _ = tx.send(HealthMessage { result });
+        });
+    }
+
+    pub fn apply_health_message(&mut self, message: HealthMessage) {
+        match message.result {
+            Ok(health) => {
+                self.health = Some(health);
+                let max_scroll = self.max_health_scroll();
+                self.health_scroll_offset = self.health_scroll_offset.min(max_scroll);
+                self.last_error = None;
+                self.status = "Health check complete".to_string();
+                self.last_health_check = Some(Instant::now());
+            }
+            Err(err) => {
+                self.last_error = Some(err.to_string());
+                self.status = "Health check failed".to_string();
+            }
+        }
+
+        self.pending_health = false;
         self.last_refresh = Instant::now();
     }
 
@@ -311,6 +484,7 @@ impl App {
                     if !self.package_results.is_empty() {
                         self.view_mode = ViewMode::PackageResults;
                     }
+                    self.status = format!("Search results: {}", self.package_results.len());
                 }
             }
             Err(err) => {
@@ -346,7 +520,39 @@ pub enum InputMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
+pub enum IconMode {
+    Auto,
+    Nerd,
+    Ascii,
+}
+
+fn detect_icon_ascii() -> bool {
+    if let Ok(value) = std::env::var("BREWERY_ASCII") {
+        if value == "1" || value.eq_ignore_ascii_case("true") {
+            return true;
+        }
+    }
+    false
+}
+
+#[derive(Clone, Copy, PartialEq)]
 pub enum ViewMode {
     Details,
     PackageResults,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum FocusedPanel {
+    Leaves,
+    Sizes,
+    Health,
+    Details,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum HealthTab {
+    #[default]
+    Activity,
+    Errors,
+    Outdated,
 }

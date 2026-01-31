@@ -10,7 +10,7 @@ pub struct SizesMessage {
     pub result: anyhow::Result<Vec<SizeEntry>>,
 }
 
-pub async fn fetch_sizes(limit: usize) -> anyhow::Result<Vec<SizeEntry>> {
+pub async fn fetch_sizes() -> anyhow::Result<Vec<SizeEntry>> {
     let cellar = fetch_cellar_path().await?;
     let mut entries = Vec::new();
 
@@ -48,8 +48,6 @@ pub async fn fetch_sizes(limit: usize) -> anyhow::Result<Vec<SizeEntry>> {
         .collect();
 
     sizes.sort_by(|a, b| b.size_kb.cmp(&a.size_kb));
-    sizes.truncate(limit);
-
     Ok(sizes)
 }
 
