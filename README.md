@@ -40,7 +40,9 @@ Brewery is a Rust TUI for Homebrew. WIP.
 ## Font
 - Nerd Font is optional; set `BREWERY_ASCII=1` or press `Alt+i` to use ASCII icons.
 
-## Run (current implementation)
+## Installation
+
 ```bash
-cargo run
+cargo install brewery
 ```
+
