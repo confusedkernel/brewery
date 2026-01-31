@@ -1,6 +1,6 @@
 [package]
 name = "brewery"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A fast, friendly TUI for Homebrew"
 license = "MIT"
