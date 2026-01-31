@@ -8,7 +8,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, ViewMode};
 use crate::brew::DetailsLoad;
 use crate::ui::draw;
 
@@ -33,12 +33,20 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
     let mut app = App::new();
     app.refresh_leaves();
     let (details_tx, mut details_rx) = mpsc::unbounded_channel();
+    let (sizes_tx, mut sizes_rx) = mpsc::unbounded_channel();
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel();
 
     loop {
         terminal.draw(|frame| draw(frame, &app))?;
 
         while let Ok(message) = details_rx.try_recv() {
             app.apply_details_message(message);
+        }
+        while let Ok(message) = sizes_rx.try_recv() {
+            app.apply_sizes_message(message);
+        }
+        while let Ok(message) = command_rx.try_recv() {
+            app.apply_command_message(message);
         }
 
         if event::poll(TICK_RATE)? {
@@ -49,11 +57,49 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                             KeyCode::Char('r') => app.refresh_leaves(),
                             KeyCode::Char('t') => app.cycle_theme(),
+                            KeyCode::Char('s') => app.request_sizes(&sizes_tx),
+                            KeyCode::Char('v') => {
+                                app.view_mode = match app.view_mode {
+                                    ViewMode::Details => ViewMode::PackageResults,
+                                    ViewMode::PackageResults => ViewMode::Details,
+                                };
+                            }
                             KeyCode::Char('/') => {
-                                app.input_mode = InputMode::Search;
-                                app.search_query.clear();
+                                app.input_mode = InputMode::SearchLeaves;
+                                app.leaves_query.clear();
                                 app.status = "Search".to_string();
                                 app.last_refresh = std::time::Instant::now();
+                            }
+                            KeyCode::Char('f') => {
+                                app.input_mode = InputMode::PackageSearch;
+                                app.package_query.clear();
+                                app.status = "Search packages".to_string();
+                                app.last_refresh = std::time::Instant::now();
+                            }
+                            KeyCode::Char('i') => {
+                                app.input_mode = InputMode::PackageInstall;
+                                app.package_query.clear();
+                                app.status = "Install package".to_string();
+                                app.last_refresh = std::time::Instant::now();
+                            }
+                            KeyCode::Char('u') => {
+                                app.input_mode = InputMode::PackageUninstall;
+                                app.package_query.clear();
+                                app.status = "Uninstall package".to_string();
+                                app.last_refresh = std::time::Instant::now();
+                            }
+                            KeyCode::Char('c') => {
+                                app.request_command("cleanup", &["cleanup", "-s"], &command_tx);
+                            }
+                            KeyCode::Char('a') => {
+                                app.request_command("autoremove", &["autoremove"], &command_tx);
+                            }
+                            KeyCode::Char('b') => {
+                                app.request_command(
+                                    "bundle dump",
+                                    &["bundle", "dump", "--force"],
+                                    &command_tx,
+                                );
                             }
                             KeyCode::Enter => {
                                 app.request_details(DetailsLoad::Basic, &details_tx);
@@ -65,17 +111,69 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             KeyCode::Down | KeyCode::Char('j') => app.select_next(),
                             _ => {}
                         },
-                        InputMode::Search => match key.code {
+                        InputMode::SearchLeaves => match key.code {
                             KeyCode::Esc | KeyCode::Enter => {
                                 app.input_mode = InputMode::Normal;
                                 app.status = "Ready".to_string();
                                 app.last_refresh = std::time::Instant::now();
                             }
                             KeyCode::Backspace => {
-                                app.search_query.pop();
+                                app.leaves_query.pop();
                             }
                             KeyCode::Char(ch) => {
-                                app.search_query.push(ch);
+                                app.leaves_query.push(ch);
+                            }
+                            _ => {}
+                        },
+                        InputMode::PackageSearch
+                        | InputMode::PackageInstall
+                        | InputMode::PackageUninstall => match key.code {
+                            KeyCode::Esc => {
+                                app.input_mode = InputMode::Normal;
+                                app.status = "Ready".to_string();
+                                app.last_refresh = std::time::Instant::now();
+                            }
+                            KeyCode::Enter => {
+                                let query = app.package_query.trim().to_string();
+                                if query.is_empty() {
+                                    app.status = "Enter a package name".to_string();
+                                    app.last_refresh = std::time::Instant::now();
+                                    continue;
+                                }
+
+                                match app.input_mode {
+                                    InputMode::PackageSearch => {
+                                        app.request_command(
+                                            "search",
+                                            &["search", &query],
+                                            &command_tx,
+                                        );
+                                        app.view_mode = crate::app::ViewMode::PackageResults;
+                                    }
+                                    InputMode::PackageInstall => {
+                                        app.request_command(
+                                            "install",
+                                            &["install", &query],
+                                            &command_tx,
+                                        );
+                                    }
+                                    InputMode::PackageUninstall => {
+                                        app.request_command(
+                                            "uninstall",
+                                            &["uninstall", &query],
+                                            &command_tx,
+                                        );
+                                    }
+                                    _ => {}
+                                }
+
+                                app.input_mode = InputMode::Normal;
+                            }
+                            KeyCode::Backspace => {
+                                app.package_query.pop();
+                            }
+                            KeyCode::Char(ch) => {
+                                app.package_query.push(ch);
                             }
                             _ => {}
                         },

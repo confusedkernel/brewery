@@ -4,7 +4,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::brew::{
-    fetch_details_basic, fetch_details_full, fetch_leaves, Details, DetailsLoad, DetailsMessage,
+    fetch_details_basic, fetch_details_full, fetch_leaves, fetch_sizes, run_brew_command,
+    CommandMessage, Details, DetailsLoad, DetailsMessage, SizeEntry, SizesMessage,
 };
 use crate::theme::{detect_system_theme, Theme, ThemeMode};
 
@@ -15,13 +16,23 @@ pub struct App {
     pub theme_mode: ThemeMode,
     pub theme: Theme,
     pub input_mode: InputMode,
-    pub search_query: String,
+    pub leaves_query: String,
+    pub package_query: String,
     pub leaves: Vec<String>,
     pub selected_index: Option<usize>,
     pub details_cache: HashMap<String, Details>,
     pub pending_details: Option<String>,
+    pub package_results: Vec<String>,
+    pub view_mode: ViewMode,
+    pub sizes: Vec<SizeEntry>,
+    pub pending_sizes: bool,
+    pub pending_command: bool,
+    pub last_command: Option<String>,
+    pub last_command_output: Vec<String>,
+    pub last_command_error: Option<String>,
     pub last_error: Option<String>,
     pub last_leaves_refresh: Option<Instant>,
+    pub last_sizes_refresh: Option<Instant>,
 }
 
 impl App {
@@ -34,13 +45,23 @@ impl App {
             theme_mode: ThemeMode::Auto,
             theme,
             input_mode: InputMode::Normal,
-            search_query: String::new(),
+            leaves_query: String::new(),
+            package_query: String::new(),
             leaves: Vec::new(),
             selected_index: Some(0),
             details_cache: HashMap::new(),
             pending_details: None,
+            package_results: Vec::new(),
+            view_mode: ViewMode::Details,
+            sizes: Vec::new(),
+            pending_sizes: false,
+            pending_command: false,
+            last_command: None,
+            last_command_output: Vec::new(),
+            last_command_error: None,
             last_error: None,
             last_leaves_refresh: None,
+            last_sizes_refresh: None,
         }
     }
 
@@ -93,7 +114,7 @@ impl App {
     }
 
     pub fn filtered_leaves(&self) -> Vec<(usize, &str)> {
-        if self.search_query.is_empty() {
+        if self.leaves_query.is_empty() {
             return self
                 .leaves
                 .iter()
@@ -101,7 +122,7 @@ impl App {
                 .map(|(idx, item)| (idx, item.as_str()))
                 .collect();
         }
-        let needle = self.search_query.to_lowercase();
+        let needle = self.leaves_query.to_lowercase();
         self.leaves
             .iter()
             .enumerate()
@@ -204,6 +225,103 @@ impl App {
         self.pending_details = None;
         self.last_refresh = Instant::now();
     }
+
+    pub fn request_sizes(&mut self, tx: &mpsc::UnboundedSender<SizesMessage>) {
+        if self.pending_sizes {
+            return;
+        }
+
+        self.pending_sizes = true;
+        self.status = "Loading sizes...".to_string();
+        self.last_refresh = Instant::now();
+
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let result = fetch_sizes(12).await;
+            let _ = tx.send(SizesMessage { result });
+        });
+    }
+
+    pub fn apply_sizes_message(&mut self, message: SizesMessage) {
+        match message.result {
+            Ok(sizes) => {
+                self.sizes = sizes;
+                self.last_error = None;
+                self.status = "Sizes updated".to_string();
+                self.last_sizes_refresh = Some(Instant::now());
+            }
+            Err(err) => {
+                self.last_error = Some(err.to_string());
+                self.status = "Sizes failed".to_string();
+            }
+        }
+
+        self.pending_sizes = false;
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn request_command(&mut self, label: &str, args: &[&str], tx: &mpsc::UnboundedSender<CommandMessage>) {
+        if self.pending_command {
+            return;
+        }
+
+        self.pending_command = true;
+        self.last_command = Some(label.to_string());
+        self.last_command_output.clear();
+        self.last_command_error = None;
+        self.status = format!("Running {label}...");
+        self.last_refresh = Instant::now();
+
+        let tx = tx.clone();
+        let label = label.to_string();
+        let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+        tokio::spawn(async move {
+            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let result = run_brew_command(&arg_refs).await;
+            let _ = tx.send(CommandMessage { label, result });
+        });
+    }
+
+    pub fn apply_command_message(&mut self, message: CommandMessage) {
+        match message.result {
+            Ok(result) => {
+                let lines: Vec<String> = if result.stdout.trim().is_empty() {
+                    result.stderr.lines().map(str::to_string).collect()
+                } else {
+                    result.stdout.lines().map(str::to_string).collect()
+                };
+                self.last_command_output = lines.into_iter().take(8).collect();
+                if result.success {
+                    self.status = format!("{label} complete", label = message.label);
+                } else {
+                    self.status = format!("{label} failed", label = message.label);
+                    if !result.stderr.trim().is_empty() {
+                        self.last_command_error = Some(result.stderr.trim().to_string());
+                    }
+                }
+
+                if message.label == "search" {
+                    self.package_results = result
+                        .stdout
+                        .lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(|line| line.to_string())
+                        .collect();
+                    if !self.package_results.is_empty() {
+                        self.view_mode = ViewMode::PackageResults;
+                    }
+                }
+            }
+            Err(err) => {
+                self.last_command_error = Some(err.to_string());
+                self.status = format!("{label} failed", label = message.label);
+            }
+        }
+
+        self.pending_command = false;
+        self.last_refresh = Instant::now();
+    }
 }
 
 fn merge_details(existing: &mut Details, incoming: &Details) {
@@ -221,5 +339,14 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
 #[derive(Clone, Copy)]
 pub enum InputMode {
     Normal,
-    Search,
+    SearchLeaves,
+    PackageSearch,
+    PackageInstall,
+    PackageUninstall,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ViewMode {
+    Details,
+    PackageResults,
 }

@@ -102,12 +102,19 @@ fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
 
     let middle_rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(7), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(7),
+            Constraint::Length(7),
+            Constraint::Min(0),
+        ])
         .split(columns[1]);
 
     let search_label = match app.input_mode {
-        InputMode::Search => "Search (type, Enter to apply)",
-        InputMode::Normal => "Search (/ to focus)",
+        InputMode::SearchLeaves => "Search leaves (type, Enter)",
+        InputMode::PackageSearch => "Search packages (type, Enter)",
+        InputMode::PackageInstall => "Install package (type, Enter)",
+        InputMode::PackageUninstall => "Uninstall package (type, Enter)",
+        InputMode::Normal => "Search (/ for leaves, f for packages)",
     };
     let search_block = Block::default()
         .borders(Borders::ALL)
@@ -115,13 +122,16 @@ fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         .style(Style::default().bg(theme.bg_header))
         .title(Span::styled(search_label, Style::default().fg(theme.amber)));
 
-    let search_text = if app.search_query.is_empty() {
-        Span::styled(
-            "type to filter leaves",
-            Style::default().fg(theme.text_secondary),
-        )
+    let search_value = match app.input_mode {
+        InputMode::PackageSearch | InputMode::PackageInstall | InputMode::PackageUninstall => {
+            &app.package_query
+        }
+        _ => &app.leaves_query,
+    };
+    let search_text = if search_value.is_empty() {
+        Span::styled("type to filter", Style::default().fg(theme.text_secondary))
     } else {
-        Span::styled(&app.search_query, Style::default().fg(theme.text_primary))
+        Span::styled(search_value, Style::default().fg(theme.text_primary))
     };
 
     let search = Paragraph::new(Line::from(vec![search_text]))
@@ -202,34 +212,106 @@ fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         .last_leaves_refresh
         .map(|instant| format!("{}s ago", instant.elapsed().as_secs()))
         .unwrap_or_else(|| "never".to_string());
-    let activity = Paragraph::new(vec![
+    let last_sizes_refresh = app
+        .last_sizes_refresh
+        .map(|instant| format!("{}s ago", instant.elapsed().as_secs()))
+        .unwrap_or_else(|| "never".to_string());
+    let mut activity_lines = vec![
         Line::from(Span::styled(
             format!("Leaves refresh: {}", last_refresh),
             Style::default().fg(theme.text_primary),
         )),
         Line::from(Span::styled(
-            "Queue: empty",
+            format!("Sizes refresh: {}", last_sizes_refresh),
             Style::default().fg(theme.text_primary),
         )),
         Line::from(""),
-        Line::from(Span::styled("Errors", Style::default().fg(theme.hop_green))),
         Line::from(Span::styled(
-            app.last_error.as_deref().unwrap_or("none"),
-            Style::default().fg(theme.text_secondary),
+            "Last command",
+            Style::default().fg(theme.hop_green),
         )),
-    ])
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.copper))
-            .style(Style::default().bg(theme.bg_panel))
-            .title(Span::styled("Activity", Style::default().fg(theme.amber))),
-    )
-    .wrap(Wrap { trim: true });
+    ];
+
+    if let Some(label) = app.last_command.as_deref() {
+        activity_lines.push(Line::from(Span::styled(
+            label,
+            Style::default().fg(theme.text_secondary),
+        )));
+    } else {
+        activity_lines.push(Line::from(Span::styled(
+            "none",
+            Style::default().fg(theme.text_secondary),
+        )));
+    }
+
+    for line in app.last_command_output.iter().take(3) {
+        activity_lines.push(Line::from(Span::styled(
+            line.clone(),
+            Style::default().fg(theme.text_secondary),
+        )));
+    }
+
+    if let Some(error) = app.last_error.as_deref() {
+        activity_lines.push(Line::from(""));
+        activity_lines.push(Line::from(Span::styled(
+            "Error",
+            Style::default().fg(theme.hop_green),
+        )));
+        activity_lines.push(Line::from(Span::styled(
+            error,
+            Style::default().fg(theme.text_secondary),
+        )));
+    }
+
+    let activity = Paragraph::new(activity_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.copper))
+                .style(Style::default().bg(theme.bg_panel))
+                .title(Span::styled("Activity", Style::default().fg(theme.amber))),
+        )
+        .wrap(Wrap { trim: true });
     frame.render_widget(activity, middle_rows[1]);
 
+    // Sizes panel
+    let sizes_title = if app.pending_sizes {
+        "Top sizes (loading...)".to_string()
+    } else {
+        "Top sizes".to_string()
+    };
+    let sizes_lines = if app.sizes.is_empty() {
+        vec![Line::from(Span::styled(
+            "Press s to load sizes",
+            Style::default().fg(theme.text_secondary),
+        ))]
+    } else {
+        app.sizes
+            .iter()
+            .map(|entry| {
+                Line::from(Span::styled(
+                    format!("{:>6}  {}", format_size(entry.size_kb), entry.name),
+                    Style::default().fg(theme.text_primary),
+                ))
+            })
+            .collect()
+    };
+    let sizes = Paragraph::new(sizes_lines)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.copper))
+                .style(Style::default().bg(theme.bg_panel))
+                .title(Span::styled(sizes_title, Style::default().fg(theme.amber))),
+        )
+        .wrap(Wrap { trim: true });
+    frame.render_widget(sizes, middle_rows[2]);
+
     // Details panel
-    let details_lines = build_details_lines(app);
+    let details_lines = match app.view_mode {
+        crate::app::ViewMode::Details => build_details_lines(app),
+        crate::app::ViewMode::PackageResults => build_package_results(app),
+    };
     let details_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.copper))
@@ -256,6 +338,26 @@ fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         ),
         Span::styled(" refresh  ", Style::default().fg(theme.text_primary)),
         Span::styled(
+            " s ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" sizes  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " f ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" search  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " i ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" install  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " u ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" uninstall  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
             " Enter ",
             Style::default().bg(theme.amber).fg(theme.text_on_accent),
         ),
@@ -266,10 +368,25 @@ fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         ),
         Span::styled(" deps  ", Style::default().fg(theme.text_primary)),
         Span::styled(
-            " / ",
+            " c ",
             Style::default().bg(theme.amber).fg(theme.text_on_accent),
         ),
-        Span::styled(" search  ", Style::default().fg(theme.text_primary)),
+        Span::styled(" cleanup  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " a ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" autoremove  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " b ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" brewfile  ", Style::default().fg(theme.text_primary)),
+        Span::styled(
+            " v ",
+            Style::default().bg(theme.amber).fg(theme.text_on_accent),
+        ),
+        Span::styled(" view  ", Style::default().fg(theme.text_primary)),
         Span::styled(
             " t ",
             Style::default().bg(theme.amber).fg(theme.text_on_accent),
@@ -392,6 +509,40 @@ fn build_details_lines(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
+fn build_package_results(app: &App) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    let mut lines = Vec::new();
+    lines.push(Line::from(Span::styled(
+        "Search results",
+        Style::default()
+            .fg(theme.amber)
+            .add_modifier(Modifier::BOLD),
+    )));
+
+    if app.package_results.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "No results yet",
+            Style::default().fg(theme.text_secondary),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Press f to search",
+            Style::default().fg(theme.text_secondary),
+        )));
+        return lines;
+    }
+
+    lines.push(Line::from(""));
+    for item in app.package_results.iter().take(16) {
+        lines.push(Line::from(Span::styled(
+            format!("- {item}"),
+            Style::default().fg(theme.text_primary),
+        )));
+    }
+
+    lines
+}
+
 fn format_list_inline(items: &[String]) -> String {
     if items.is_empty() {
         return "none".to_string();
@@ -417,4 +568,13 @@ fn format_list_multiline(items: &[String], theme: &Theme) -> Vec<Line<'static>> 
             ))
         })
         .collect()
+}
+
+fn format_size(size_kb: u64) -> String {
+    let size_mb = size_kb as f64 / 1024.0;
+    if size_mb < 1024.0 {
+        return format!("{size_mb:.1}M");
+    }
+    let size_gb = size_mb / 1024.0;
+    format!("{size_gb:.1}G")
 }
