@@ -21,6 +21,9 @@ pub struct App {
     pub package_query: String,
     pub leaves: Vec<String>,
     pub filtered_leaves: Vec<usize>,
+    pub package_results_selected: Option<usize>,
+    pub last_package_search: Option<String>,
+    pub last_result_details_pkg: Option<String>,
     pub selected_index: Option<usize>,
     pub details_cache: HashMap<String, Details>,
     pub pending_details: Option<String>,
@@ -63,6 +66,9 @@ impl App {
             package_query: String::new(),
             leaves: Vec::new(),
             filtered_leaves: Vec::new(),
+            package_results_selected: None,
+            last_package_search: None,
+            last_result_details_pkg: None,
             selected_index: Some(0),
             details_cache: HashMap::new(),
             pending_details: None,
@@ -145,8 +151,8 @@ impl App {
 
     pub fn health_tab_next(&mut self) {
         self.health_tab = match self.health_tab {
-            HealthTab::Activity => HealthTab::Errors,
-            HealthTab::Errors => HealthTab::Outdated,
+            HealthTab::Activity => HealthTab::Issues,
+            HealthTab::Issues => HealthTab::Outdated,
             HealthTab::Outdated => HealthTab::Activity,
         };
         self.health_scroll_offset = 0; // Reset scroll when switching tabs
@@ -155,8 +161,8 @@ impl App {
     pub fn health_tab_prev(&mut self) {
         self.health_tab = match self.health_tab {
             HealthTab::Activity => HealthTab::Outdated,
-            HealthTab::Errors => HealthTab::Activity,
-            HealthTab::Outdated => HealthTab::Errors,
+            HealthTab::Issues => HealthTab::Activity,
+            HealthTab::Outdated => HealthTab::Issues,
         };
         self.health_scroll_offset = 0;
     }
@@ -204,7 +210,7 @@ impl App {
             .map(|h| {
                 let count = match self.health_tab {
                     HealthTab::Outdated => h.outdated_packages.len(),
-                    HealthTab::Errors => h.doctor_issues.len(),
+                    HealthTab::Issues => h.doctor_issues.len(),
                     HealthTab::Activity => 7, // Fixed number of activity items
                 };
                 count.saturating_sub(2)
@@ -244,6 +250,52 @@ impl App {
             .iter()
             .filter_map(|idx| self.leaves.get(*idx).map(|item| (*idx, item.as_str())))
             .collect()
+    }
+
+    pub fn selected_package_result(&self) -> Option<&str> {
+        let selected = self.package_results_selected?;
+        self.package_results.get(selected).map(String::as_str)
+    }
+
+    pub fn selected_package_name(&self) -> Option<&str> {
+        if self.input_mode == InputMode::PackageSearch {
+            self.selected_package_result()
+        } else {
+            self.selected_leaf()
+        }
+    }
+
+    pub fn select_next_result(&mut self) {
+        if self.package_results.is_empty() {
+            self.package_results_selected = None;
+            return;
+        }
+        let next = match self.package_results_selected {
+            Some(idx) => (idx + 1).min(self.package_results.len() - 1),
+            None => 0,
+        };
+        self.package_results_selected = Some(next);
+        self.last_result_details_pkg = None;
+    }
+
+    pub fn select_prev_result(&mut self) {
+        if self.package_results.is_empty() {
+            self.package_results_selected = None;
+            return;
+        }
+        let prev = match self.package_results_selected {
+            Some(idx) => idx.saturating_sub(1),
+            None => 0,
+        };
+        self.package_results_selected = Some(prev);
+        self.last_result_details_pkg = None;
+    }
+
+    pub fn clear_package_results(&mut self) {
+        self.package_results.clear();
+        self.package_results_selected = None;
+        self.last_package_search = None;
+        self.last_result_details_pkg = None;
     }
 
     pub fn update_filtered_leaves(&mut self) {
@@ -299,6 +351,17 @@ impl App {
         let Some(pkg) = self.selected_leaf().map(str::to_string) else {
             return;
         };
+
+        self.request_details_for(&pkg, load, tx);
+    }
+
+    pub fn request_details_for(
+        &mut self,
+        pkg: &str,
+        load: DetailsLoad,
+        tx: &mpsc::UnboundedSender<DetailsMessage>,
+    ) {
+        let pkg = pkg.to_string();
 
         if let Some(pending) = self.pending_details.as_ref() {
             if pending == &pkg {
@@ -481,9 +544,12 @@ impl App {
                         .filter(|line| !line.is_empty())
                         .map(|line| line.to_string())
                         .collect();
-                    if !self.package_results.is_empty() {
-                        self.view_mode = ViewMode::PackageResults;
+                    if self.package_results.is_empty() {
+                        self.package_results_selected = None;
+                    } else {
+                        self.package_results_selected = Some(0);
                     }
+                    self.last_result_details_pkg = None;
                     self.status = format!("Search results: {}", self.package_results.len());
                 }
             }
@@ -510,7 +576,7 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum InputMode {
     Normal,
     SearchLeaves,
@@ -553,6 +619,6 @@ pub enum FocusedPanel {
 pub enum HealthTab {
     #[default]
     Activity,
-    Errors,
+    Issues,
     Outdated,
 }

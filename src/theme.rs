@@ -85,7 +85,7 @@ pub enum ThemeMode {
 }
 
 pub fn detect_system_theme() -> Theme {
-    // Check COLORFGBG env var (set by many terminals)
+    // Check COLORFGBG env var
     if let Ok(colorfgbg) = std::env::var("COLORFGBG") {
         if let Some(bg) = colorfgbg.split(';').last() {
             if let Ok(bg_num) = bg.parse::<u8>() {

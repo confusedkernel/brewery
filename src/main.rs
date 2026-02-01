@@ -57,6 +57,15 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
             app.apply_health_message(message);
         }
 
+        if app.input_mode == InputMode::PackageSearch {
+            if let Some(pkg) = app.selected_package_result().map(str::to_string) {
+                if app.last_result_details_pkg.as_deref() != Some(pkg.as_str()) {
+                    app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
+                    app.last_result_details_pkg = Some(pkg);
+                }
+            }
+        }
+
         if event::poll(TICK_RATE)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
@@ -116,6 +125,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             KeyCode::Char('f') => {
                                 app.input_mode = InputMode::PackageSearch;
                                 app.package_query.clear();
+                                app.clear_package_results();
                                 app.status = "Search packages".to_string();
                                 app.last_refresh = std::time::Instant::now();
                             }
@@ -196,6 +206,16 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.status = "Ready".to_string();
                                 app.last_refresh = std::time::Instant::now();
                             }
+                            KeyCode::Up | KeyCode::Char('k')
+                                if app.input_mode == InputMode::PackageSearch =>
+                            {
+                                app.select_prev_result();
+                            }
+                            KeyCode::Down | KeyCode::Char('j')
+                                if app.input_mode == InputMode::PackageSearch =>
+                            {
+                                app.select_next_result();
+                            }
                             KeyCode::Enter => {
                                 let query = app.package_query.trim().to_string();
                                 if query.is_empty() {
@@ -206,12 +226,31 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
 
                                 match app.input_mode {
                                     InputMode::PackageSearch => {
+                                        if app.last_package_search.as_deref() == Some(query.as_str())
+                                        {
+                                            if let Some(pkg) =
+                                                app.selected_package_result().map(str::to_string)
+                                            {
+                                                app.request_details_for(
+                                                    &pkg,
+                                                    DetailsLoad::Basic,
+                                                    &details_tx,
+                                                );
+                                                app.status = "Loading details...".to_string();
+                                                app.last_refresh = std::time::Instant::now();
+                                            } else {
+                                                app.status = "No result selected".to_string();
+                                                app.last_refresh = std::time::Instant::now();
+                                            }
+                                            continue;
+                                        }
+
                                         app.request_command(
                                             "search",
                                             &["search", &query],
                                             &command_tx,
                                         );
-                                        app.view_mode = crate::app::ViewMode::PackageResults;
+                                        app.last_package_search = Some(query);
                                         app.status = "Search submitted".to_string();
                                         app.last_refresh = std::time::Instant::now();
                                         continue;
@@ -235,11 +274,33 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
 
                                 app.input_mode = InputMode::Normal;
                             }
+                            KeyCode::Char('d') if app.input_mode == InputMode::PackageSearch => {
+                                if let Some(pkg) =
+                                    app.selected_package_result().map(str::to_string)
+                                {
+                                    app.request_details_for(
+                                        &pkg,
+                                        DetailsLoad::Full,
+                                        &details_tx,
+                                    );
+                                    app.status = "Loading deps/uses...".to_string();
+                                    app.last_refresh = std::time::Instant::now();
+                                } else {
+                                    app.status = "No result selected".to_string();
+                                    app.last_refresh = std::time::Instant::now();
+                                }
+                            }
                             KeyCode::Backspace => {
                                 app.package_query.pop();
+                                if app.input_mode == InputMode::PackageSearch {
+                                    app.clear_package_results();
+                                }
                             }
                             KeyCode::Char(ch) => {
                                 app.package_query.push(ch);
+                                if app.input_mode == InputMode::PackageSearch {
+                                    app.clear_package_results();
+                                }
                             }
                             _ => {}
                         },

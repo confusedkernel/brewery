@@ -13,12 +13,19 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let install_icon = icon_label(app, "󰏗", "+");
     let remove_icon = icon_label(app, "󰆴", "-");
 
+    // Padding (replace with smarter implementation soon)
+    let title_prefix = if app.icons_ascii { "" } else { " " };
     let (label, is_active) = match app.input_mode {
-        InputMode::SearchLeaves => (format!("{search_icon} Search leaves"), true),
-        InputMode::PackageSearch => (format!("{search_icon} Search packages"), true),
-        InputMode::PackageInstall => (format!("{install_icon} Install package"), true),
-        InputMode::PackageUninstall => (format!("{remove_icon} Remove package"), true),
-        InputMode::Normal => (format!("{search_icon} Search (/)"), false),
+        InputMode::SearchLeaves => (format!("{title_prefix}{search_icon} Search leaves"), true),
+        InputMode::PackageSearch => (format!("{title_prefix}{search_icon} Search packages"), true),
+        InputMode::PackageInstall => (
+            format!("{title_prefix}{install_icon} Install package"),
+            true,
+        ),
+        InputMode::PackageUninstall => {
+            (format!("{title_prefix}{remove_icon} Remove package"), true)
+        }
+        InputMode::Normal => (format!("{title_prefix}{search_icon} Search"), false),
     };
 
     let border_color = if is_active {
@@ -40,7 +47,14 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     };
 
     let search_text = if search_value.is_empty() {
-        Span::styled("type to filter...", Style::default().fg(theme.text_muted))
+        if is_active {
+            Span::styled("type to filter...", Style::default().fg(theme.text_muted))
+        } else {
+            Span::styled(
+                "f for package, / for leaves",
+                Style::default().fg(theme.text_muted),
+            )
+        }
     } else {
         Span::styled(search_value, Style::default().fg(theme.text_primary))
     };
@@ -51,9 +65,17 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         .style(Style::default().bg(theme.bg_panel))
         .title(Span::styled(label, Style::default().fg(title_color)));
 
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let padded = Rect {
+        x: inner.x.saturating_add(2),
+        y: inner.y,
+        width: inner.width.saturating_sub(2),
+        height: inner.height,
+    };
+
     let search = Paragraph::new(Line::from(vec![search_text]))
-        .block(block)
         .style(Style::default().bg(theme.bg_panel))
         .wrap(Wrap { trim: true });
-    frame.render_widget(search, area);
+    frame.render_widget(search, padded);
 }

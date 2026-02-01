@@ -3,30 +3,55 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 
-use crate::app::App;
+use crate::app::{App, InputMode};
 use crate::ui::util::symbol;
 
 pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let leaves = app.filtered_leaves();
-    let title = format!(" Leaves ({})", leaves.len());
-
-    let list_items: Vec<ListItem> = if leaves.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled(
-            "No leaves found",
-            Style::default().fg(theme.text_muted),
-        )))]
+    let (title, list_items, selected_pos) = if app.input_mode == InputMode::PackageSearch {
+        let results = &app.package_results;
+        let title = format!(" Results ({})", results.len());
+        let items = if results.is_empty() {
+            vec![ListItem::new(Line::from(Span::styled(
+                "  No results yet",
+                Style::default().fg(theme.text_muted),
+            )))]
+        } else {
+            results
+                .iter()
+                .map(|item| {
+                    ListItem::new(Line::from(Span::styled(
+                        format!(" {}", item),
+                        Style::default().fg(theme.text_primary),
+                    )))
+                })
+                .collect()
+        };
+        (title, items, app.package_results_selected)
     } else {
-        leaves
-            .iter()
-            .map(|(_, item)| {
-                ListItem::new(Line::from(Span::styled(
-                    format!(" {}", item),
-                    Style::default().fg(theme.text_primary),
-                )))
-            })
-            .collect()
+        let leaves = app.filtered_leaves();
+        let title = format!(" Leaves ({})", leaves.len());
+        let items = if leaves.is_empty() {
+            vec![ListItem::new(Line::from(Span::styled(
+                "  No leaves found",
+                Style::default().fg(theme.text_muted),
+            )))]
+        } else {
+            leaves
+                .iter()
+                .map(|(_, item)| {
+                    ListItem::new(Line::from(Span::styled(
+                        format!(" {}", item),
+                        Style::default().fg(theme.text_primary),
+                    )))
+                })
+                .collect()
+        };
+        let selected = app
+            .selected_index
+            .and_then(|selected| leaves.iter().position(|(idx, _)| *idx == selected));
+        (title, items, selected)
     };
 
     let border_color = if is_focused {
@@ -63,9 +88,6 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         .highlight_symbol(symbol(app, "▌", "> "));
 
     let mut list_state = ListState::default();
-    let selected_pos = app
-        .selected_index
-        .and_then(|selected| leaves.iter().position(|(idx, _)| *idx == selected));
     list_state.select(selected_pos);
     frame.render_stateful_widget(leaves_list, area, &mut list_state);
 }

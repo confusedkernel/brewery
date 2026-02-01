@@ -32,7 +32,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                         .collect()
                 }
             }
-            HealthTab::Errors => {
+            HealthTab::Issues => {
                 if health.doctor_issues.is_empty() {
                     vec![(
                         format!("{} No issues found", symbol(app, "✓", "ok")),
@@ -152,7 +152,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
 
     let tabs = [
         ("Activity", HealthTab::Activity),
-        ("Errors", HealthTab::Errors),
+        ("Issues", HealthTab::Issues),
         ("Outdated", HealthTab::Outdated),
     ];
 
