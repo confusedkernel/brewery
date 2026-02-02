@@ -62,6 +62,8 @@ pub struct App {
     pub help_scroll_offset: usize,
     pub needs_redraw: bool,
     pub last_selection_change: Option<Instant>,
+    /// Count of recent selection changes (for detecting rapid scrolling)
+    pub recent_selection_count: u8,
 }
 
 impl App {
@@ -115,6 +117,7 @@ impl App {
             help_scroll_offset: 0,
             needs_redraw: true,
             last_selection_change: None,
+            recent_selection_count: 0,
         }
     }
 
@@ -122,10 +125,34 @@ impl App {
         // Always request redraw on tick for spinner animation and elapsed time updates
         self.needs_redraw = true;
         
+        // Decay the rapid scroll counter over time
+        // This allows the counter to reset if the user pauses
+        if self.last_selection_change
+            .map(|t| t.elapsed() >= Duration::from_millis(300))
+            .unwrap_or(true)
+        {
+            self.recent_selection_count = 0;
+        }
+        
         if self.last_refresh.elapsed() >= Duration::from_secs(5) {
             self.last_refresh = Instant::now();
             self.status = "Idle".to_string();
         }
+    }
+
+    /// Call this when the selection changes (scrolling through list)
+    /// Tracks rapid scrolling to avoid excessive detail fetches
+    pub fn on_selection_change(&mut self) {
+        self.last_selection_change = Some(Instant::now());
+        // Increment counter, saturating at 255
+        self.recent_selection_count = self.recent_selection_count.saturating_add(1);
+        self.needs_redraw = true;
+    }
+
+    /// Returns true if the user appears to be rapidly scrolling
+    /// (more than 2 selection changes without a pause)
+    pub fn is_rapid_scrolling(&self) -> bool {
+        self.recent_selection_count > 2
     }
 
     pub fn cycle_theme(&mut self) {

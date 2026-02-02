@@ -23,7 +23,7 @@ const TICK_RATE: Duration = Duration::from_millis(500);
 /// Debounce delay for auto-fetching details when selection changes.
 /// This prevents rapid-fire requests when scrolling quickly through lists.
 /// Details will only be fetched after the user has stopped on an item for this duration.
-const DETAILS_DEBOUNCE: Duration = Duration::from_millis(400);
+const DETAILS_DEBOUNCE: Duration = Duration::from_millis(300);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -45,7 +45,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
     let (command_tx, mut command_rx) = mpsc::unbounded_channel();
     let (health_tx, mut health_rx) = mpsc::unbounded_channel();
     
-    let mut last_selected_leaf: Option<String> = None;
+    let mut last_fetched_leaf: Option<String> = None;
 
     // Kick off all startup fetches in parallel (non-blocking)
     app.request_leaves(&leaves_tx);
@@ -89,34 +89,48 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
         }
 
         // Debounced auto-fetch details for package search results
+        // Skip if user is rapidly scrolling to reduce CPU load
         if matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             if let Some(pkg) = app.selected_package_result().map(str::to_string) {
-                if app.last_result_details_pkg.as_deref() != Some(pkg.as_str()) {
-                    // Check debounce
-                    let should_fetch = app.last_selection_change
-                        .map(|t| t.elapsed() >= DETAILS_DEBOUNCE)
-                        .unwrap_or(true);
-                    
-                    if should_fetch {
-                        app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
-                        app.last_result_details_pkg = Some(pkg);
-                    }
+                // Only fetch if:
+                // 1. We haven't already fetched this package's details
+                // 2. The debounce period has elapsed since last selection change
+                // 3. We're not currently loading details for another package
+                // 4. User is not rapidly scrolling
+                let already_fetched = app.last_result_details_pkg.as_deref() == Some(pkg.as_str());
+                let debounce_elapsed = app.last_selection_change
+                    .map(|t| t.elapsed() >= DETAILS_DEBOUNCE)
+                    .unwrap_or(true);
+                let not_pending = app.pending_details.is_none();
+                let not_scrolling = !app.is_rapid_scrolling();
+                
+                if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
+                    app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
+                    app.last_result_details_pkg = Some(pkg);
                 }
             }
         }
 
         // Debounced auto-fetch details for selected leaf
+        // Skip if user is rapidly scrolling to reduce CPU load
         if !matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             let selected = app.selected_leaf().map(str::to_string);
-            if selected.is_some() && selected != last_selected_leaf {
-                // Check debounce
-                let should_fetch = app.last_selection_change
+            if let Some(ref pkg) = selected {
+                // Only fetch if:
+                // 1. We haven't already fetched this package's details
+                // 2. The debounce period has elapsed since last selection change
+                // 3. We're not currently loading details for another package
+                // 4. User is not rapidly scrolling
+                let already_fetched = last_fetched_leaf.as_ref() == Some(pkg);
+                let debounce_elapsed = app.last_selection_change
                     .map(|t| t.elapsed() >= DETAILS_DEBOUNCE)
                     .unwrap_or(true);
+                let not_pending = app.pending_details.is_none();
+                let not_scrolling = !app.is_rapid_scrolling();
                 
-                if should_fetch {
+                if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
                     app.request_details(DetailsLoad::Basic, &details_tx);
-                    last_selected_leaf = selected;
+                    last_fetched_leaf = selected.clone();
                 }
             }
         }
@@ -304,14 +318,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.scroll_focused_up();
                                 if app.focus_panel == FocusedPanel::Leaves {
                                     app.pending_package_action = None;
-                                    app.last_selection_change = Some(Instant::now());
+                                    app.on_selection_change();
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.scroll_focused_down();
                                 if app.focus_panel == FocusedPanel::Leaves {
                                     app.pending_package_action = None;
-                                    app.last_selection_change = Some(Instant::now());
+                                    app.on_selection_change();
                                 }
                             }
                             KeyCode::Left | KeyCode::Char('l') if app.focus_panel == FocusedPanel::Health => {
@@ -341,11 +355,11 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             }
                             KeyCode::Up => {
                                 app.select_prev();
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Down => {
                                 app.select_next();
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Backspace => {
                                 app.leaves_query.pop();
@@ -368,11 +382,11 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             }
                             KeyCode::Up => {
                                 app.select_prev_result();
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Down => {
                                 app.select_next_result();
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Enter => {
                                 let query = app.package_query.trim().to_string();
@@ -427,12 +441,12 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             KeyCode::Up | KeyCode::Char('k') => {
                                 app.select_prev_result();
                                 app.pending_package_action = None;
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.select_next_result();
                                 app.pending_package_action = None;
-                                app.last_selection_change = Some(Instant::now());
+                                app.on_selection_change();
                             }
                             KeyCode::Char('i') => {
                                 let Some(pkg) =

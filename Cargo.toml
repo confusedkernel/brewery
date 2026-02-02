@@ -12,7 +12,14 @@ documentation = "https://github.com/confusedkernel/brewery"
 [dependencies]
 anyhow = "1.0"
 crossterm = "0.28"
+lru = "0.12"
 ratatui = "0.29"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.43", features = ["macros", "process", "rt-multi-thread", "time", "sync"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
