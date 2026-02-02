@@ -63,3 +63,7 @@ Brewery is a Rust TUI for Homebrew. WIP.
 cargo install brewery
 ```
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed release notes and version history.
+
