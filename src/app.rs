@@ -35,9 +35,13 @@ pub struct App {
     pub icons_ascii: bool,
     pub pending_command: bool,
     pub last_command: Option<String>,
+    pub last_command_target: Option<String>,
+    pub command_started_at: Option<Instant>,
+    pub last_command_completed: Option<(String, String, Instant)>,
     pub last_command_output: Vec<String>,
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,
+    pub pending_package_action: Option<PendingPackageAction>,
     pub last_leaves_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
     pub focus_panel: FocusedPanel,
@@ -80,9 +84,13 @@ impl App {
             icons_ascii: detect_icon_ascii(),
             pending_command: false,
             last_command: None,
+            last_command_target: None,
+            command_started_at: None,
+            last_command_completed: None,
             last_command_output: Vec::new(),
             last_command_error: None,
             last_error: None,
+            pending_package_action: None,
             last_leaves_refresh: None,
             last_sizes_refresh: None,
             focus_panel: FocusedPanel::Leaves,
@@ -211,11 +219,52 @@ impl App {
                 let count = match self.health_tab {
                     HealthTab::Outdated => h.outdated_packages.len(),
                     HealthTab::Issues => h.doctor_issues.len(),
-                    HealthTab::Activity => 7, // Fixed number of activity items
+                    HealthTab::Activity => self.activity_item_count(),
                 };
                 count.saturating_sub(2)
             })
             .unwrap_or(0)
+    }
+
+    fn activity_item_count(&self) -> usize {
+        let Some(health) = self.health.as_ref() else {
+            return 0;
+        };
+
+        let mut count = 0;
+        if self.pending_command
+            && matches!(self.last_command.as_deref(), Some("install") | Some("uninstall"))
+        {
+            count += 1 + self.last_command_output.len();
+            if self.last_command_target.is_some() {
+                count += 1;
+            }
+        }
+        if self
+            .last_command_completed
+            .as_ref()
+            .map(|(_, _, at)| at.elapsed().as_secs() < 3)
+            .unwrap_or(false)
+        {
+            count += 1;
+        }
+        if health.brew_version.is_some() {
+            count += 1;
+        }
+        count += 2; // doctor + packages
+        if self.last_health_check.is_some() {
+            count += 1;
+        }
+        if self.last_leaves_refresh.is_some() {
+            count += 1;
+        }
+        if self.last_sizes_refresh.is_some() {
+            count += 1;
+        }
+        if self.last_command.is_some() {
+            count += 1;
+        }
+        count
     }
 
     pub fn refresh_leaves(&mut self) {
@@ -258,7 +307,7 @@ impl App {
     }
 
     pub fn selected_package_name(&self) -> Option<&str> {
-        if self.input_mode == InputMode::PackageSearch {
+        if matches!(self.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             self.selected_package_result()
         } else {
             self.selected_leaf()
@@ -523,7 +572,7 @@ impl App {
         }
 
         self.pending_health = true;
-        self.status = "Checking health...".to_string();
+        self.status = "Checking status...".to_string();
         self.last_refresh = Instant::now();
 
         let tx = tx.clone();
@@ -540,12 +589,12 @@ impl App {
                 let max_scroll = self.max_health_scroll();
                 self.health_scroll_offset = self.health_scroll_offset.min(max_scroll);
                 self.last_error = None;
-                self.status = "Health check complete".to_string();
+                self.status = "Status check complete".to_string();
                 self.last_health_check = Some(Instant::now());
             }
             Err(err) => {
                 self.last_error = Some(err.to_string());
-                self.status = "Health check failed".to_string();
+                self.status = "Status check failed".to_string();
             }
         }
 
@@ -560,6 +609,11 @@ impl App {
 
         self.pending_command = true;
         self.last_command = Some(label.to_string());
+        self.last_command_target = match label {
+            "install" | "uninstall" => args.last().map(|value| (*value).to_string()),
+            _ => None,
+        };
+        self.command_started_at = Some(Instant::now());
         self.last_command_output.clear();
         self.last_command_error = None;
         self.status = format!("Running {label}...");
@@ -603,11 +657,21 @@ impl App {
                         .collect();
                     if self.package_results.is_empty() {
                         self.package_results_selected = None;
+                        self.status = "No results found".to_string();
                     } else {
                         self.package_results_selected = Some(0);
+                        // Auto-transition to PackageResults mode
+                        self.input_mode = InputMode::PackageResults;
+                        self.status = format!("{} results", self.package_results.len());
                     }
                     self.last_result_details_pkg = None;
-                    self.status = format!("Search results: {}", self.package_results.len());
+                }
+
+                if matches!(message.label.as_str(), "install" | "uninstall") {
+                    if let Some(pkg) = self.last_command_target.clone() {
+                        self.last_command_completed =
+                            Some((message.label.clone(), pkg, Instant::now()));
+                    }
                 }
             }
             Err(err) => {
@@ -617,6 +681,7 @@ impl App {
         }
 
         self.pending_command = false;
+        self.command_started_at = None;
         self.last_refresh = Instant::now();
     }
 }
@@ -638,8 +703,7 @@ pub enum InputMode {
     Normal,
     SearchLeaves,
     PackageSearch,
-    PackageInstall,
-    PackageUninstall,
+    PackageResults,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -647,6 +711,18 @@ pub enum IconMode {
     Auto,
     Nerd,
     Ascii,
+}
+
+#[derive(Clone, PartialEq)]
+pub enum PackageAction {
+    Install,
+    Uninstall,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct PendingPackageAction {
+    pub action: PackageAction,
+    pub pkg: String,
 }
 
 fn detect_icon_ascii() -> bool {

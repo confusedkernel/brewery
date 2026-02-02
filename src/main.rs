@@ -1,5 +1,5 @@
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -8,7 +8,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tokio::sync::mpsc;
 
-use crate::app::{App, FocusedPanel, InputMode, ViewMode};
+use crate::app::{App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, ViewMode};
 use crate::brew::DetailsLoad;
 use crate::ui::{draw, help};
 
@@ -36,6 +36,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
     let (sizes_tx, mut sizes_rx) = mpsc::unbounded_channel();
     let (command_tx, mut command_rx) = mpsc::unbounded_channel();
     let (health_tx, mut health_rx) = mpsc::unbounded_channel();
+    let mut last_selected_leaf: Option<String> = None;
 
     // Auto-fetch health and sizes on startup
     app.request_health(&health_tx);
@@ -57,7 +58,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
             app.apply_health_message(message);
         }
 
-        if app.input_mode == InputMode::PackageSearch {
+        if matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             if let Some(pkg) = app.selected_package_result().map(str::to_string) {
                 if app.last_result_details_pkg.as_deref() != Some(pkg.as_str()) {
                     app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
@@ -66,20 +67,30 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
             }
         }
 
+        if !matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
+            let selected = app.selected_leaf().map(str::to_string);
+            if selected.is_some() && selected != last_selected_leaf {
+                app.request_details(DetailsLoad::Basic, &details_tx);
+                last_selected_leaf = selected;
+            }
+        }
+
         if event::poll(TICK_RATE)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    // Handle help popup toggle first
-                    if key.code == KeyCode::Char('?') {
-                        app.toggle_help();
-                        continue;
-                    }
+                    // Handle global keymaps only in Normal mode
+                    if app.input_mode == InputMode::Normal {
+                        if key.code == KeyCode::Char('?') {
+                            app.toggle_help();
+                            continue;
+                        }
 
-                    if key.code == KeyCode::Char('i')
-                        && key.modifiers.contains(KeyModifiers::ALT)
-                    {
-                        app.toggle_icons();
-                        continue;
+                        if key.code == KeyCode::Char('i')
+                            && key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            app.toggle_icons();
+                            continue;
+                        }
                     }
 
                     // Close help popup with Esc
@@ -104,7 +115,19 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
 
                     match app.input_mode {
                         InputMode::Normal => match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                            KeyCode::Char('q') => return Ok(()),
+                            KeyCode::Esc => {
+                                if app.pending_package_action.is_some() {
+                                    app.pending_package_action = None;
+                                    app.status = "Canceled".to_string();
+                                    app.last_refresh = Instant::now();
+                                } else if !app.leaves_query.is_empty() {
+                                    app.leaves_query.clear();
+                                    app.update_filtered_leaves();
+                                    app.status = "Filters cleared".to_string();
+                                    app.last_refresh = Instant::now();
+                                }
+                            }
                             KeyCode::Char('r') => app.refresh_leaves(),
                             KeyCode::Char('t') => app.cycle_theme(),
                             KeyCode::Char('s') => app.request_sizes(&sizes_tx),
@@ -130,16 +153,72 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.last_refresh = std::time::Instant::now();
                             }
                             KeyCode::Char('i') => {
-                                app.input_mode = InputMode::PackageInstall;
-                                app.package_query.clear();
-                                app.status = "Install package".to_string();
-                                app.last_refresh = std::time::Instant::now();
+                                if app.focus_panel == FocusedPanel::Leaves {
+                                    let Some(pkg) = app.selected_leaf().map(str::to_string) else {
+                                        app.status = "No leaf selected".to_string();
+                                        app.last_refresh = Instant::now();
+                                        continue;
+                                    };
+
+                                    let action = PackageAction::Install;
+                                    if matches!(app.pending_package_action.as_ref(),
+                                        Some(pending) if pending.action == action && pending.pkg == pkg)
+                                    {
+                                        app.request_command(
+                                            "install",
+                                            &["install", &pkg],
+                                            &command_tx,
+                                        );
+                                        app.pending_package_action = None;
+                                        app.status = "Installing...".to_string();
+                                        app.last_refresh = Instant::now();
+                                    } else {
+                                        app.pending_package_action = Some(PendingPackageAction {
+                                            action,
+                                            pkg: pkg.clone(),
+                                        });
+                                        app.status =
+                                            format!("Install {pkg}? [i] confirm, [Esc] cancel");
+                                        app.last_refresh = Instant::now();
+                                    }
+                                } else {
+                                    app.status = "Focus leaves to install".to_string();
+                                    app.last_refresh = Instant::now();
+                                }
                             }
                             KeyCode::Char('u') => {
-                                app.input_mode = InputMode::PackageUninstall;
-                                app.package_query.clear();
-                                app.status = "Uninstall package".to_string();
-                                app.last_refresh = std::time::Instant::now();
+                                if app.focus_panel == FocusedPanel::Leaves {
+                                    let Some(pkg) = app.selected_leaf().map(str::to_string) else {
+                                        app.status = "No leaf selected".to_string();
+                                        app.last_refresh = Instant::now();
+                                        continue;
+                                    };
+
+                                    let action = PackageAction::Uninstall;
+                                    if matches!(app.pending_package_action.as_ref(),
+                                        Some(pending) if pending.action == action && pending.pkg == pkg)
+                                    {
+                                        app.request_command(
+                                            "uninstall",
+                                            &["uninstall", &pkg],
+                                            &command_tx,
+                                        );
+                                        app.pending_package_action = None;
+                                        app.status = "Uninstalling...".to_string();
+                                        app.last_refresh = Instant::now();
+                                    } else {
+                                        app.pending_package_action = Some(PendingPackageAction {
+                                            action,
+                                            pkg: pkg.clone(),
+                                        });
+                                        app.status =
+                                            format!("Uninstall {pkg}? [u] confirm, [Esc] cancel");
+                                        app.last_refresh = Instant::now();
+                                    }
+                                } else {
+                                    app.status = "Focus leaves to uninstall".to_string();
+                                    app.last_refresh = Instant::now();
+                                }
                             }
                             KeyCode::Char('c') => {
                                 app.request_command("cleanup", &["cleanup", "-s"], &command_tx);
@@ -172,8 +251,18 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.status = format!("Focus: {:?}", app.focus_panel);
                                 app.last_refresh = std::time::Instant::now();
                             }
-                            KeyCode::Up | KeyCode::Char('k') => app.scroll_focused_up(),
-                            KeyCode::Down | KeyCode::Char('j') => app.scroll_focused_down(),
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.scroll_focused_up();
+                                if app.focus_panel == FocusedPanel::Leaves {
+                                    app.pending_package_action = None;
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.scroll_focused_down();
+                                if app.focus_panel == FocusedPanel::Leaves {
+                                    app.pending_package_action = None;
+                                }
+                            }
                             KeyCode::Left | KeyCode::Char('l') if app.focus_panel == FocusedPanel::Health => {
                                 app.health_tab_prev();
                             }
@@ -183,15 +272,26 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             _ => {}
                         },
                         InputMode::SearchLeaves => match key.code {
-                            KeyCode::Esc | KeyCode::Enter => {
+                            KeyCode::Enter => {
+                                // Exit typing mode, filter persists, i/u now available
                                 app.input_mode = InputMode::Normal;
                                 app.status = "Ready".to_string();
-                                app.last_refresh = std::time::Instant::now();
+                                app.last_refresh = Instant::now();
                             }
-                            KeyCode::Up | KeyCode::Char('k') => {
+                            KeyCode::Esc => {
+                                // Clear filter and exit
+                                if !app.leaves_query.is_empty() {
+                                    app.leaves_query.clear();
+                                    app.update_filtered_leaves();
+                                }
+                                app.input_mode = InputMode::Normal;
+                                app.status = "Ready".to_string();
+                                app.last_refresh = Instant::now();
+                            }
+                            KeyCode::Up => {
                                 app.select_prev();
                             }
-                            KeyCode::Down | KeyCode::Char('j') => {
+                            KeyCode::Down => {
                                 app.select_next();
                             }
                             KeyCode::Backspace => {
@@ -204,108 +304,135 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             }
                             _ => {}
                         },
-                        InputMode::PackageSearch
-                        | InputMode::PackageInstall
-                        | InputMode::PackageUninstall => match key.code {
+                        InputMode::PackageSearch => match key.code {
                             KeyCode::Esc => {
+                                // Cancel and exit to Normal
                                 app.input_mode = InputMode::Normal;
+                                app.package_query.clear();
+                                app.clear_package_results();
                                 app.status = "Ready".to_string();
-                                app.last_refresh = std::time::Instant::now();
+                                app.last_refresh = Instant::now();
                             }
-                            KeyCode::Up | KeyCode::Char('k')
-                                if app.input_mode == InputMode::PackageSearch =>
-                            {
+                            KeyCode::Up => {
                                 app.select_prev_result();
                             }
-                            KeyCode::Down | KeyCode::Char('j')
-                                if app.input_mode == InputMode::PackageSearch =>
-                            {
+                            KeyCode::Down => {
                                 app.select_next_result();
                             }
                             KeyCode::Enter => {
                                 let query = app.package_query.trim().to_string();
                                 if query.is_empty() {
                                     app.status = "Enter a package name".to_string();
-                                    app.last_refresh = std::time::Instant::now();
+                                    app.last_refresh = Instant::now();
                                     continue;
                                 }
 
-                                match app.input_mode {
-                                    InputMode::PackageSearch => {
-                                        if app.last_package_search.as_deref() == Some(query.as_str())
-                                        {
-                                            if let Some(pkg) =
-                                                app.selected_package_result().map(str::to_string)
-                                            {
-                                                app.request_details_for(
-                                                    &pkg,
-                                                    DetailsLoad::Basic,
-                                                    &details_tx,
-                                                );
-                                                app.status = "Loading details...".to_string();
-                                                app.last_refresh = std::time::Instant::now();
-                                            } else {
-                                                app.status = "No result selected".to_string();
-                                                app.last_refresh = std::time::Instant::now();
-                                            }
-                                            continue;
-                                        }
-
-                                        app.request_command(
-                                            "search",
-                                            &["search", &query],
-                                            &command_tx,
-                                        );
-                                        app.last_package_search = Some(query);
-                                        app.status = "Search submitted".to_string();
-                                        app.last_refresh = std::time::Instant::now();
-                                        continue;
-                                    }
-                                    InputMode::PackageInstall => {
-                                        app.request_command(
-                                            "install",
-                                            &["install", &query],
-                                            &command_tx,
-                                        );
-                                    }
-                                    InputMode::PackageUninstall => {
-                                        app.request_command(
-                                            "uninstall",
-                                            &["uninstall", &query],
-                                            &command_tx,
-                                        );
-                                    }
-                                    _ => {}
-                                }
-
-                                app.input_mode = InputMode::Normal;
-                            }
-                            KeyCode::Char('d') if app.input_mode == InputMode::PackageSearch => {
-                                if let Some(pkg) =
-                                    app.selected_package_result().map(str::to_string)
-                                {
-                                    app.request_details_for(
-                                        &pkg,
-                                        DetailsLoad::Full,
-                                        &details_tx,
-                                    );
-                                    app.status = "Loading deps/uses...".to_string();
-                                    app.last_refresh = std::time::Instant::now();
-                                } else {
-                                    app.status = "No result selected".to_string();
-                                    app.last_refresh = std::time::Instant::now();
-                                }
+                                app.request_command(
+                                    "search",
+                                    &["search", &query],
+                                    &command_tx,
+                                );
+                                app.last_package_search = Some(query);
+                                app.status = "Searching...".to_string();
+                                app.last_refresh = Instant::now();
                             }
                             KeyCode::Backspace => {
                                 app.package_query.pop();
-                                if app.input_mode == InputMode::PackageSearch {
-                                    app.clear_package_results();
-                                }
+                                app.clear_package_results();
                             }
                             KeyCode::Char(ch) => {
                                 app.package_query.push(ch);
-                                if app.input_mode == InputMode::PackageSearch {
+                                app.clear_package_results();
+                            }
+                            _ => {}
+                        },
+                        InputMode::PackageResults => match key.code {
+                            KeyCode::Esc => {
+                                if app.pending_package_action.is_some() {
+                                    app.pending_package_action = None;
+                                    app.status = "Canceled".to_string();
+                                    app.last_refresh = Instant::now();
+                                } else {
+                                    app.input_mode = InputMode::Normal;
+                                    app.package_query.clear();
                                     app.clear_package_results();
+                                    app.status = "Ready".to_string();
+                                    app.last_refresh = Instant::now();
+                                }
+                            }
+                            KeyCode::Char('f') => {
+                                // Go back to search input for a new query
+                                app.input_mode = InputMode::PackageSearch;
+                                app.package_query.clear();
+                                app.clear_package_results();
+                                app.pending_package_action = None;
+                                app.status = "Search packages".to_string();
+                                app.last_refresh = Instant::now();
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.select_prev_result();
+                                app.pending_package_action = None;
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.select_next_result();
+                                app.pending_package_action = None;
+                            }
+                            KeyCode::Char('i') => {
+                                let Some(pkg) =
+                                    app.selected_package_result().map(str::to_string)
+                                else {
+                                    app.status = "No result selected".to_string();
+                                    app.last_refresh = Instant::now();
+                                    continue;
+                                };
+
+                                let action = PackageAction::Install;
+                                if matches!(app.pending_package_action.as_ref(),
+                                    Some(pending) if pending.action == action && pending.pkg == pkg)
+                                {
+                                    app.request_command("install", &["install", &pkg], &command_tx);
+                                    app.pending_package_action = None;
+                                    app.status = "Installing...".to_string();
+                                    app.last_refresh = Instant::now();
+                                } else {
+                                    app.pending_package_action = Some(PendingPackageAction {
+                                        action,
+                                        pkg: pkg.clone(),
+                                    });
+                                    app.status =
+                                        format!("Install {pkg}? [i] confirm, [Esc] cancel");
+                                    app.last_refresh = Instant::now();
+                                }
+                            }
+                            KeyCode::Char('u') => {
+                                let Some(pkg) =
+                                    app.selected_package_result().map(str::to_string)
+                                else {
+                                    app.status = "No result selected".to_string();
+                                    app.last_refresh = Instant::now();
+                                    continue;
+                                };
+
+                                let action = PackageAction::Uninstall;
+                                if matches!(app.pending_package_action.as_ref(),
+                                    Some(pending) if pending.action == action && pending.pkg == pkg)
+                                {
+                                    app.request_command(
+                                        "uninstall",
+                                        &["uninstall", &pkg],
+                                        &command_tx,
+                                    );
+                                    app.pending_package_action = None;
+                                    app.status = "Uninstalling...".to_string();
+                                    app.last_refresh = Instant::now();
+                                } else {
+                                    app.pending_package_action = Some(PendingPackageAction {
+                                        action,
+                                        pkg: pkg.clone(),
+                                    });
+                                    app.status =
+                                        format!("Uninstall {pkg}? [u] confirm, [Esc] cancel");
+                                    app.last_refresh = Instant::now();
                                 }
                             }
                             _ => {}

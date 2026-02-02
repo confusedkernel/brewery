@@ -42,8 +42,8 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let search_text = if search_value.is_empty() {
         if is_active {
             let hint = match app.input_mode {
-                InputMode::PackageSearch => "type to search... (Esc to lock results)",
-                InputMode::SearchLeaves => "type to filter... (Enter to lock, Esc to clear)",
+                InputMode::PackageSearch => "type to search... (Enter to search, Esc to cancel)",
+                InputMode::SearchLeaves => "type to filter... (Enter to browse, Esc to clear)",
                 _ => "type to filter...",
             };
             Span::styled(hint, Style::default().fg(theme.text_muted))

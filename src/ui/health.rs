@@ -103,7 +103,13 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                     let mut items = Vec::new();
 
                     if let Some(ver) = &health.brew_version {
-                        items.push((format!("Version: {}", ver), theme.text_primary));
+                        let sep = symbol(app, "·", "|");
+                        let info = health
+                            .brew_info
+                            .as_ref()
+                            .map(|value| format!(" {sep} {value}"))
+                            .unwrap_or_default();
+                        items.push((format!("Version: {ver}{info}"), theme.text_primary));
                     }
 
                     let doctor_status = match health.doctor_ok {

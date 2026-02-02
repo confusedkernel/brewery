@@ -13,25 +13,42 @@ Brewery is a Rust TUI for Homebrew. WIP.
 - Light/dark theme with auto-detection and manual toggle
 
 ## Controls
+
+### Navigation
 - `j`/`k` or `↑`/`↓`: move selection
-- `/`: search leaves
-- `f`: search packages
-- `i`: install package
-- `u`: uninstall package
+- `Tab`/`Shift+Tab`: cycle focus between panels
+
+### Search Modes
+- `/`: filter installed leaves (type to filter live)
+  - `Enter`: exit filter mode and browse results (filter persists)
+  - `Esc`: clear filter and exit
+- `f`: search all packages (type query)
+  - `Enter`: execute search (auto-enters results mode)
+  - `Esc`: cancel and exit
+
+### Package Actions
+- `i`: install package (press twice to confirm)
+- `u`: uninstall package (press twice to confirm)
+- `Esc`: cancel pending action
+
+### Details
 - `Enter`: load details for selected package
 - `d`: load deps and reverse deps for selected package
+
+### Maintenance
 - `r`: refresh leaves list
 - `s`: load sizes
 - `h`: health check
 - `c`: cleanup
 - `a`: autoremove
 - `b`: bundle dump
+
+### View
 - `v`: toggle details/results view
-- `Tab`/`Shift+Tab`: cycle focus
 - `t`: toggle theme (auto/light/dark)
 - `Alt+i`: toggle Nerd/ASCII icons
 - `?`: help
-- `q` or `Esc`: quit
+- `q`: quit
 
 ## Requirements
 - Homebrew installed and available as `brew`

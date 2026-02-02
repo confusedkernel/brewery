@@ -8,6 +8,7 @@ pub struct HealthStatus {
     pub outdated_count: Option<usize>,
     pub outdated_packages: Vec<String>,
     pub brew_version: Option<String>,
+    pub brew_info: Option<String>,
 }
 
 pub struct HealthMessage {
@@ -20,7 +21,19 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
     // Get brew version
     if let Ok(result) = run_brew_command(&["--version"]).await {
         if result.success {
-            status.brew_version = result.stdout.lines().next().map(|s| s.trim().to_string());
+            let mut lines = result.stdout.lines().map(|s| s.trim()).filter(|s| !s.is_empty());
+            status.brew_version = lines.next().map(str::to_string);
+        }
+    }
+
+    if let Ok(result) = run_brew_command(&["info"]).await {
+        if result.success {
+            status.brew_info = result
+                .stdout
+                .lines()
+                .map(|s| s.trim())
+                .find(|line| !line.is_empty())
+                .map(str::to_string);
         }
     }
 
