@@ -9,7 +9,7 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 use crate::app::{App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, ViewMode};
-use crate::brew::DetailsLoad;
+use crate::brew::{DetailsLoad, LeavesMessage};
 use crate::ui::{draw, help};
 
 mod app;
@@ -17,7 +17,13 @@ mod brew;
 mod theme;
 mod ui;
 
-const TICK_RATE: Duration = Duration::from_millis(250);
+/// Tick rate for the main event loop (500ms for good balance of responsiveness and CPU)
+const TICK_RATE: Duration = Duration::from_millis(500);
+
+/// Debounce delay for auto-fetching details when selection changes.
+/// This prevents rapid-fire requests when scrolling quickly through lists.
+/// Details will only be fetched after the user has stopped on an item for this duration.
+const DETAILS_DEBOUNCE: Duration = Duration::from_millis(400);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,53 +37,96 @@ async fn main() -> anyhow::Result<()> {
 
 async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
     let mut app = App::new();
-    app.refresh_leaves();
+    
+    // Create all message channels
+    let (leaves_tx, mut leaves_rx) = mpsc::unbounded_channel::<LeavesMessage>();
     let (details_tx, mut details_rx) = mpsc::unbounded_channel();
     let (sizes_tx, mut sizes_rx) = mpsc::unbounded_channel();
     let (command_tx, mut command_rx) = mpsc::unbounded_channel();
     let (health_tx, mut health_rx) = mpsc::unbounded_channel();
+    
     let mut last_selected_leaf: Option<String> = None;
 
-    // Auto-fetch health and sizes on startup
+    // Kick off all startup fetches in parallel (non-blocking)
+    app.request_leaves(&leaves_tx);
     app.request_health(&health_tx);
     app.request_sizes(&sizes_tx);
 
     loop {
-        terminal.draw(|frame| draw(frame, &app))?;
+        // Only redraw when needed
+        if app.needs_redraw {
+            terminal.draw(|frame| draw(frame, &app))?;
+            app.needs_redraw = false;
+        }
 
+        // Process all pending messages (mark dirty on each)
+        let mut received_message = false;
+        
+        while let Ok(message) = leaves_rx.try_recv() {
+            app.apply_leaves_message(message);
+            received_message = true;
+        }
         while let Ok(message) = details_rx.try_recv() {
             app.apply_details_message(message);
+            received_message = true;
         }
         while let Ok(message) = sizes_rx.try_recv() {
             app.apply_sizes_message(message);
+            received_message = true;
         }
         while let Ok(message) = command_rx.try_recv() {
             app.apply_command_message(message);
+            received_message = true;
         }
         while let Ok(message) = health_rx.try_recv() {
             app.apply_health_message(message);
+            received_message = true;
         }
 
+        // If we received messages, request a redraw
+        if received_message {
+            app.needs_redraw = true;
+        }
+
+        // Debounced auto-fetch details for package search results
         if matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             if let Some(pkg) = app.selected_package_result().map(str::to_string) {
                 if app.last_result_details_pkg.as_deref() != Some(pkg.as_str()) {
-                    app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
-                    app.last_result_details_pkg = Some(pkg);
+                    // Check debounce
+                    let should_fetch = app.last_selection_change
+                        .map(|t| t.elapsed() >= DETAILS_DEBOUNCE)
+                        .unwrap_or(true);
+                    
+                    if should_fetch {
+                        app.request_details_for(&pkg, DetailsLoad::Basic, &details_tx);
+                        app.last_result_details_pkg = Some(pkg);
+                    }
                 }
             }
         }
 
+        // Debounced auto-fetch details for selected leaf
         if !matches!(app.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
             let selected = app.selected_leaf().map(str::to_string);
             if selected.is_some() && selected != last_selected_leaf {
-                app.request_details(DetailsLoad::Basic, &details_tx);
-                last_selected_leaf = selected;
+                // Check debounce
+                let should_fetch = app.last_selection_change
+                    .map(|t| t.elapsed() >= DETAILS_DEBOUNCE)
+                    .unwrap_or(true);
+                
+                if should_fetch {
+                    app.request_details(DetailsLoad::Basic, &details_tx);
+                    last_selected_leaf = selected;
+                }
             }
         }
 
         if event::poll(TICK_RATE)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
+                    // Any keypress should trigger a redraw
+                    app.needs_redraw = true;
+                    
                     // Handle global keymaps only in Normal mode
                     if app.input_mode == InputMode::Normal {
                         if key.code == KeyCode::Char('?') {
@@ -128,7 +177,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                     app.last_refresh = Instant::now();
                                 }
                             }
-                            KeyCode::Char('r') => app.refresh_leaves(),
+                            KeyCode::Char('r') => app.request_leaves(&leaves_tx),
                             KeyCode::Char('t') => app.cycle_theme(),
                             KeyCode::Char('s') => app.request_sizes(&sizes_tx),
                             KeyCode::Char('h') => app.request_health(&health_tx),
@@ -255,12 +304,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.scroll_focused_up();
                                 if app.focus_panel == FocusedPanel::Leaves {
                                     app.pending_package_action = None;
+                                    app.last_selection_change = Some(Instant::now());
                                 }
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.scroll_focused_down();
                                 if app.focus_panel == FocusedPanel::Leaves {
                                     app.pending_package_action = None;
+                                    app.last_selection_change = Some(Instant::now());
                                 }
                             }
                             KeyCode::Left | KeyCode::Char('l') if app.focus_panel == FocusedPanel::Health => {
@@ -290,9 +341,11 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             }
                             KeyCode::Up => {
                                 app.select_prev();
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Down => {
                                 app.select_next();
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Backspace => {
                                 app.leaves_query.pop();
@@ -315,9 +368,11 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             }
                             KeyCode::Up => {
                                 app.select_prev_result();
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Down => {
                                 app.select_next_result();
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Enter => {
                                 let query = app.package_query.trim().to_string();
@@ -372,10 +427,12 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                             KeyCode::Up | KeyCode::Char('k') => {
                                 app.select_prev_result();
                                 app.pending_package_action = None;
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Down | KeyCode::Char('j') => {
                                 app.select_next_result();
                                 app.pending_package_action = None;
+                                app.last_selection_change = Some(Instant::now());
                             }
                             KeyCode::Char('i') => {
                                 let Some(pkg) =

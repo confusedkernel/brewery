@@ -105,7 +105,7 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             .add_modifier(Modifier::BOLD),
     )));
 
-    if let Some(details) = app.details_cache.get(pkg) {
+    if let Some(details) = app.details_cache.peek(pkg) {
         if let Some(desc) = details.desc.as_ref() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(

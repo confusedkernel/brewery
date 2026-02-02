@@ -1,14 +1,18 @@
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
+use lru::LruCache;
 use tokio::sync::mpsc;
 
 use crate::brew::{
     fetch_details_basic, fetch_details_full, fetch_health, fetch_leaves, fetch_sizes,
     run_brew_command, CommandMessage, Details, DetailsLoad, DetailsMessage, HealthMessage,
-    HealthStatus, SizeEntry, SizesMessage,
+    HealthStatus, LeavesMessage, SizeEntry, SizesMessage,
 };
 use crate::theme::{detect_system_theme, Theme, ThemeMode};
+
+/// Maximum number of package details to cache
+const DETAILS_CACHE_CAPACITY: usize = 64;
 
 pub struct App {
     pub started_at: Instant,
@@ -21,11 +25,12 @@ pub struct App {
     pub package_query: String,
     pub leaves: Vec<String>,
     pub filtered_leaves: Vec<usize>,
+    pub filtered_leaves_dirty: bool,
     pub package_results_selected: Option<usize>,
     pub last_package_search: Option<String>,
     pub last_result_details_pkg: Option<String>,
     pub selected_index: Option<usize>,
-    pub details_cache: HashMap<String, Details>,
+    pub details_cache: LruCache<String, Details>,
     pub pending_details: Option<String>,
     pub package_results: Vec<String>,
     pub view_mode: ViewMode,
@@ -42,6 +47,7 @@ pub struct App {
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,
     pub pending_package_action: Option<PendingPackageAction>,
+    pub pending_leaves: bool,
     pub last_leaves_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
     pub focus_panel: FocusedPanel,
@@ -54,6 +60,8 @@ pub struct App {
     pub health_tab: HealthTab,
     pub show_help_popup: bool,
     pub help_scroll_offset: usize,
+    pub needs_redraw: bool,
+    pub last_selection_change: Option<Instant>,
 }
 
 impl App {
@@ -70,11 +78,12 @@ impl App {
             package_query: String::new(),
             leaves: Vec::new(),
             filtered_leaves: Vec::new(),
+            filtered_leaves_dirty: true,
             package_results_selected: None,
             last_package_search: None,
             last_result_details_pkg: None,
             selected_index: Some(0),
-            details_cache: HashMap::new(),
+            details_cache: LruCache::new(NonZeroUsize::new(DETAILS_CACHE_CAPACITY).unwrap()),
             pending_details: None,
             package_results: Vec::new(),
             view_mode: ViewMode::Details,
@@ -91,6 +100,7 @@ impl App {
             last_command_error: None,
             last_error: None,
             pending_package_action: None,
+            pending_leaves: false,
             last_leaves_refresh: None,
             last_sizes_refresh: None,
             focus_panel: FocusedPanel::Leaves,
@@ -103,10 +113,15 @@ impl App {
             health_tab: HealthTab::default(),
             show_help_popup: false,
             help_scroll_offset: 0,
+            needs_redraw: true,
+            last_selection_change: None,
         }
     }
 
     pub fn on_tick(&mut self) {
+        // Always request redraw on tick for spinner animation and elapsed time updates
+        self.needs_redraw = true;
+        
         if self.last_refresh.elapsed() >= Duration::from_secs(5) {
             self.last_refresh = Instant::now();
             self.status = "Idle".to_string();
@@ -267,8 +282,25 @@ impl App {
         count
     }
 
-    pub fn refresh_leaves(&mut self) {
-        match fetch_leaves() {
+    pub fn request_leaves(&mut self, tx: &mpsc::UnboundedSender<LeavesMessage>) {
+        if self.pending_leaves {
+            return;
+        }
+
+        self.pending_leaves = true;
+        self.status = "Loading leaves...".to_string();
+        self.last_refresh = Instant::now();
+        self.needs_redraw = true;
+
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let result = fetch_leaves().await;
+            let _ = tx.send(LeavesMessage { result });
+        });
+    }
+
+    pub fn apply_leaves_message(&mut self, message: LeavesMessage) {
+        match message.result {
             Ok(mut leaves) => {
                 leaves.sort();
                 self.leaves = leaves;
@@ -291,7 +323,9 @@ impl App {
                 self.status = "Failed to refresh".to_string();
             }
         }
+        self.pending_leaves = false;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
     }
 
     pub fn filtered_leaves(&self) -> Vec<(usize, &str)> {
@@ -348,6 +382,8 @@ impl App {
     }
 
     pub fn update_filtered_leaves(&mut self) {
+        self.filtered_leaves_dirty = false;
+        
         if self.leaves_query.is_empty() {
             self.filtered_leaves = (0..self.leaves.len()).collect();
             if self.leaves.is_empty() {
@@ -506,10 +542,12 @@ impl App {
     pub fn apply_details_message(&mut self, message: DetailsMessage) {
         match message.result {
             Ok(details) => {
-                self.details_cache
-                    .entry(message.pkg.clone())
-                    .and_modify(|existing| merge_details(existing, &details))
-                    .or_insert(details);
+                // LruCache doesn't have entry API, so we handle it manually
+                if let Some(existing) = self.details_cache.get_mut(&message.pkg) {
+                    merge_details(existing, &details);
+                } else {
+                    self.details_cache.put(message.pkg.clone(), details);
+                }
                 self.last_error = None;
                 self.status = match message.load {
                     DetailsLoad::Basic => "Details loaded".to_string(),
@@ -524,6 +562,7 @@ impl App {
 
         self.pending_details = None;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
     }
 
     pub fn request_sizes(&mut self, tx: &mpsc::UnboundedSender<SizesMessage>) {
@@ -534,6 +573,7 @@ impl App {
         self.pending_sizes = true;
         self.status = "Loading sizes...".to_string();
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
 
         let tx = tx.clone();
         tokio::spawn(async move {
@@ -564,6 +604,7 @@ impl App {
 
         self.pending_sizes = false;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
     }
 
     pub fn request_health(&mut self, tx: &mpsc::UnboundedSender<HealthMessage>) {
@@ -574,6 +615,7 @@ impl App {
         self.pending_health = true;
         self.status = "Checking status...".to_string();
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
 
         let tx = tx.clone();
         tokio::spawn(async move {
@@ -600,6 +642,7 @@ impl App {
 
         self.pending_health = false;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
     }
 
     pub fn request_command(&mut self, label: &str, args: &[&str], tx: &mpsc::UnboundedSender<CommandMessage>) {
@@ -618,6 +661,7 @@ impl App {
         self.last_command_error = None;
         self.status = format!("Running {label}...");
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
 
         let tx = tx.clone();
         let label = label.to_string();
@@ -683,6 +727,7 @@ impl App {
         self.pending_command = false;
         self.command_started_at = None;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
     }
 }
 

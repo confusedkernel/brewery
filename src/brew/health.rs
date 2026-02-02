@@ -18,15 +18,24 @@ pub struct HealthMessage {
 pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
     let mut status = HealthStatus::default();
 
-    // Get brew version
-    if let Ok(result) = run_brew_command(&["--version"]).await {
+    // Run independent commands in parallel (version, info, leaves, doctor)
+    let (version_result, info_result, leaves_result, doctor_result) = tokio::join!(
+        run_brew_command(&["--version"]),
+        run_brew_command(&["info"]),
+        run_brew_command(&["leaves"]),
+        run_brew_command(&["doctor"]),
+    );
+
+    // Process version result
+    if let Ok(result) = version_result {
         if result.success {
             let mut lines = result.stdout.lines().map(|s| s.trim()).filter(|s| !s.is_empty());
             status.brew_version = lines.next().map(str::to_string);
         }
     }
 
-    if let Ok(result) = run_brew_command(&["info"]).await {
+    // Process info result
+    if let Ok(result) = info_result {
         if result.success {
             status.brew_info = result
                 .stdout
@@ -37,8 +46,8 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
         }
     }
 
-    // Run brew doctor
-    if let Ok(result) = run_brew_command(&["doctor"]).await {
+    // Process doctor result
+    if let Ok(result) = doctor_result {
         status.doctor_ok = Some(result.success);
         if !result.success {
             // Parse warnings/errors from stderr or stdout
@@ -56,8 +65,8 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
         }
     }
 
-    // Get outdated leaves
-    let leaf_set: HashSet<String> = match run_brew_command(&["leaves"]).await {
+    // Build leaf set from leaves result
+    let leaf_set: HashSet<String> = match leaves_result {
         Ok(result) => result
             .stdout
             .lines()
@@ -67,6 +76,7 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
         Err(_) => HashSet::new(),
     };
 
+    // Now fetch outdated (this depends on having leaf_set ready for filtering)
     if let Ok(result) = run_brew_command(&["outdated", "--formula"]).await {
         let packages: Vec<String> = result
             .stdout
