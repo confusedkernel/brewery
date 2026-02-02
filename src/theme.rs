@@ -84,6 +84,23 @@ pub enum ThemeMode {
     Auto,
 }
 
+#[cfg(target_os = "macos")]
+pub fn detect_system_theme() -> Theme {
+    if let Ok(output) = std::process::Command::new("defaults")
+        .args(["read", "-g", "AppleInterfaceStyle"])
+        .output()
+    {
+        if output.status.success() {
+            let style = String::from_utf8_lossy(&output.stdout);
+            if style.trim().eq_ignore_ascii_case("dark") {
+                return Theme::dark();
+            }
+        }
+    }
+    Theme::light()
+}
+
+#[cfg(not(target_os = "macos"))]
 pub fn detect_system_theme() -> Theme {
     // Check COLORFGBG env var
     if let Ok(colorfgbg) = std::env::var("COLORFGBG") {
@@ -112,22 +129,5 @@ pub fn detect_system_theme() -> Theme {
         }
     }
 
-    // macOS: check AppleInterfaceStyle
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("defaults")
-            .args(["read", "-g", "AppleInterfaceStyle"])
-            .output()
-        {
-            if output.status.success() {
-                let style = String::from_utf8_lossy(&output.stdout);
-                if style.trim().eq_ignore_ascii_case("dark") {
-                    return Theme::dark();
-                }
-            }
-            return Theme::light();
-        }
-    }
-
-    Theme::dark()
+    Theme::light()
 }

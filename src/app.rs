@@ -301,6 +301,17 @@ impl App {
     pub fn update_filtered_leaves(&mut self) {
         if self.leaves_query.is_empty() {
             self.filtered_leaves = (0..self.leaves.len()).collect();
+            if self.leaves.is_empty() {
+                self.selected_index = None;
+            } else if self.selected_index.is_none() {
+                self.selected_index = Some(0);
+            } else if self
+                .selected_index
+                .map(|idx| idx >= self.leaves.len())
+                .unwrap_or(true)
+            {
+                self.selected_index = Some(0);
+            }
             return;
         }
 
@@ -312,6 +323,18 @@ impl App {
             .filter(|(_, item)| item.to_lowercase().contains(&needle))
             .map(|(idx, _)| idx)
             .collect();
+
+        if self.filtered_leaves.is_empty() {
+            self.selected_index = None;
+        } else if self
+            .selected_index
+            .map(|selected| self.filtered_leaves.contains(&selected))
+            .unwrap_or(false)
+        {
+            // keep current selection
+        } else {
+            self.selected_index = self.filtered_leaves.first().copied();
+        }
     }
 
     pub fn selected_leaf(&self) -> Option<&str> {
@@ -320,27 +343,61 @@ impl App {
     }
 
     pub fn select_next(&mut self) {
-        if self.leaves.is_empty() {
+        if self.leaves_query.is_empty() {
+            if self.leaves.is_empty() {
+                self.selected_index = None;
+                return;
+            }
+            let next = match self.selected_index {
+                Some(idx) => (idx + 1).min(self.leaves.len() - 1),
+                None => 0,
+            };
+            self.selected_index = Some(next);
+            return;
+        }
+
+        if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
         }
-        let next = match self.selected_index {
-            Some(idx) => (idx + 1).min(self.leaves.len() - 1),
+
+        let current_pos = self
+            .selected_index
+            .and_then(|selected| self.filtered_leaves.iter().position(|idx| *idx == selected));
+        let next_pos = match current_pos {
+            Some(pos) => (pos + 1).min(self.filtered_leaves.len() - 1),
             None => 0,
         };
-        self.selected_index = Some(next);
+        self.selected_index = self.filtered_leaves.get(next_pos).copied();
     }
 
     pub fn select_prev(&mut self) {
-        if self.leaves.is_empty() {
+        if self.leaves_query.is_empty() {
+            if self.leaves.is_empty() {
+                self.selected_index = None;
+                return;
+            }
+            let prev = match self.selected_index {
+                Some(idx) => idx.saturating_sub(1),
+                None => 0,
+            };
+            self.selected_index = Some(prev);
+            return;
+        }
+
+        if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
         }
-        let prev = match self.selected_index {
-            Some(idx) => idx.saturating_sub(1),
+
+        let current_pos = self
+            .selected_index
+            .and_then(|selected| self.filtered_leaves.iter().position(|idx| *idx == selected));
+        let prev_pos = match current_pos {
+            Some(pos) => pos.saturating_sub(1),
             None => 0,
         };
-        self.selected_index = Some(prev);
+        self.selected_index = self.filtered_leaves.get(prev_pos).copied();
     }
 
     pub fn request_details(

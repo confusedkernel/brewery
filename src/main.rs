@@ -188,6 +188,12 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyho
                                 app.status = "Ready".to_string();
                                 app.last_refresh = std::time::Instant::now();
                             }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.select_prev();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.select_next();
+                            }
                             KeyCode::Backspace => {
                                 app.leaves_query.pop();
                                 app.update_filtered_leaves();
