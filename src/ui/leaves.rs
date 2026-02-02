@@ -9,7 +9,10 @@ use crate::ui::util::symbol;
 pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let (title, list_items, selected_pos) = if app.input_mode == InputMode::PackageSearch {
+    let (title, list_items, selected_pos) = if matches!(
+        app.input_mode,
+        InputMode::PackageSearch | InputMode::PackageResults
+    ) {
         let results = &app.package_results;
         let title = format!(" Results ({})", results.len());
         let items = if results.is_empty() {

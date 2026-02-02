@@ -9,7 +9,10 @@ use crate::ui::util::{format_size, symbol};
 pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let details_lines = if app.input_mode == InputMode::PackageSearch {
+    let details_lines = if matches!(
+        app.input_mode,
+        InputMode::PackageSearch | InputMode::PackageResults
+    ) {
         build_details_lines(app, app.selected_package_result())
     } else {
         match app.view_mode {
@@ -55,7 +58,10 @@ pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_
 fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let Some(pkg) = pkg else {
-        if app.input_mode == InputMode::PackageSearch {
+        if matches!(
+            app.input_mode,
+            InputMode::PackageSearch | InputMode::PackageResults
+        ) {
             return vec![
                 Line::from(""),
                 Line::from(Span::styled(

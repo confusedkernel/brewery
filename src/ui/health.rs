@@ -13,7 +13,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
 
     if app.pending_health {
         lines.push(Line::from(Span::styled(
-            "  Checking health...",
+            "  Checking status...",
             Style::default().fg(theme.text_muted),
         )));
     } else if let Some(health) = &app.health {
@@ -47,61 +47,115 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 }
             }
             HealthTab::Activity => {
-                let mut items = Vec::new();
-
-                if let Some(ver) = &health.brew_version {
-                    items.push((format!("Version: {}", ver), theme.text_primary));
-                }
-
-                let doctor_status = match health.doctor_ok {
-                    Some(true) => (symbol(app, "✓ Healthy", "ok Healthy"), theme.green),
-                    Some(false) => (
-                        symbol(app, "⚠ Issues found", "! Issues found"),
-                        theme.yellow,
-                    ),
-                    None => ("? Unknown", theme.text_muted),
+                let items = if app.pending_command
+                    && matches!(
+                        app.last_command.as_deref(),
+                        Some("install") | Some("uninstall")
+                    ) {
+                    let spinner = spinner_frame(app);
+                    let action = match app.last_command.as_deref() {
+                        Some("install") => "Installing",
+                        Some("uninstall") => "Uninstalling",
+                        _ => "Running",
+                    };
+                    let label = app
+                        .last_command_target
+                        .as_ref()
+                        .map(|pkg| format!("{spinner} {action} {pkg}"))
+                        .unwrap_or_else(|| format!("{spinner} {action}"));
+                    let elapsed = app
+                        .command_started_at
+                        .map(|t| format!("{}s", t.elapsed().as_secs()))
+                        .unwrap_or_else(|| "0s".to_string());
+                    let mut items = vec![(format!("{label} ({elapsed})"), theme.accent)];
+                    if let Some(target) = app.last_command_target.as_ref() {
+                        let command = app.last_command.as_deref().unwrap_or("command");
+                        items.push((
+                            format!("Command: brew {command} {target}"),
+                            theme.text_muted,
+                        ));
+                    }
+                    items.extend(
+                        app.last_command_output
+                            .iter()
+                            .map(|line| (format!("> {line}"), theme.text_muted)),
+                    );
+                    items
+                } else if let Some((label, pkg, completed_at)) = app.last_command_completed.as_ref()
+                {
+                    if completed_at.elapsed().as_secs() < 3 {
+                        let verb = match label.as_str() {
+                            "install" => "Install",
+                            "uninstall" => "Uninstall",
+                            _ => "Command",
+                        };
+                        vec![(format!("{verb} completed: {pkg}"), theme.green)]
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
                 };
-                items.push((format!("Doctor: {}", doctor_status.0), doctor_status.1));
 
-                let outdated_status = match health.outdated_count {
-                    Some(0) => (
-                        format!("{} All up to date", symbol(app, "✓", "ok")),
-                        theme.green,
-                    ),
-                    Some(n) => (
-                        format!("{} {} outdated", symbol(app, "↑", "^"), n),
-                        theme.orange,
-                    ),
-                    None => ("? Unknown".to_string(), theme.text_muted),
-                };
-                items.push((
-                    format!("Packages: {}", outdated_status.0),
-                    outdated_status.1,
-                ));
+                if !items.is_empty() {
+                    items
+                } else {
+                    let mut items = Vec::new();
 
-                if let Some(t) = app.last_health_check {
-                    items.push((
-                        format!("Last check: {}s ago", t.elapsed().as_secs()),
-                        theme.text_muted,
-                    ));
-                }
-                if let Some(t) = app.last_leaves_refresh {
-                    items.push((
-                        format!("Leaves refresh: {}s ago", t.elapsed().as_secs()),
-                        theme.text_muted,
-                    ));
-                }
-                if let Some(t) = app.last_sizes_refresh {
-                    items.push((
-                        format!("Sizes refresh: {}s ago", t.elapsed().as_secs()),
-                        theme.text_muted,
-                    ));
-                }
-                if let Some(cmd) = &app.last_command {
-                    items.push((format!("Last cmd: {}", cmd), theme.text_secondary));
-                }
+                    if let Some(ver) = &health.brew_version {
+                        items.push((format!("Version: {}", ver), theme.text_primary));
+                    }
 
-                items
+                    let doctor_status = match health.doctor_ok {
+                        Some(true) => (symbol(app, "✓ Healthy", "ok Healthy"), theme.green),
+                        Some(false) => (
+                            symbol(app, "⚠ Issues found", "! Issues found"),
+                            theme.yellow,
+                        ),
+                        None => ("? Unknown", theme.text_muted),
+                    };
+                    items.push((format!("Doctor: {}", doctor_status.0), doctor_status.1));
+
+                    let outdated_status = match health.outdated_count {
+                        Some(0) => (
+                            format!("{} All up to date", symbol(app, "✓", "ok")),
+                            theme.green,
+                        ),
+                        Some(n) => (
+                            format!("{} {} outdated", symbol(app, "↑", "^"), n),
+                            theme.orange,
+                        ),
+                        None => ("? Unknown".to_string(), theme.text_muted),
+                    };
+                    items.push((
+                        format!("Packages: {}", outdated_status.0),
+                        outdated_status.1,
+                    ));
+
+                    if let Some(t) = app.last_health_check {
+                        items.push((
+                            format!("Last check: {}s ago", t.elapsed().as_secs()),
+                            theme.text_muted,
+                        ));
+                    }
+                    if let Some(t) = app.last_leaves_refresh {
+                        items.push((
+                            format!("Leaves refresh: {}s ago", t.elapsed().as_secs()),
+                            theme.text_muted,
+                        ));
+                    }
+                    if let Some(t) = app.last_sizes_refresh {
+                        items.push((
+                            format!("Sizes refresh: {}s ago", t.elapsed().as_secs()),
+                            theme.text_muted,
+                        ));
+                    }
+                    if let Some(cmd) = &app.last_command {
+                        items.push((format!("Last cmd: {}", cmd), theme.text_secondary));
+                    }
+
+                    items
+                }
             }
         };
 
@@ -124,7 +178,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         }
     } else {
         lines.push(Line::from(Span::styled(
-            "  Press 'h' for health check",
+            "  Press 'h' for status check",
             Style::default().fg(theme.text_muted),
         )));
     }
@@ -144,33 +198,22 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
     } else {
         theme.border
     };
-    let title_modifier = if is_focused {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-
     let tabs = [
         ("Activity", HealthTab::Activity),
         ("Issues", HealthTab::Issues),
         ("Outdated", HealthTab::Outdated),
     ];
 
-    let mut title_spans: Vec<Span> = vec![
-        Span::styled(
-            " Health ",
-            Style::default()
-                .fg(theme.green)
-                .add_modifier(title_modifier),
-        ),
-        Span::styled("│", Style::default().fg(theme.border)),
-    ];
+    let mut title_spans: Vec<Span> = Vec::new();
 
     for (i, (name, tab)) in tabs.iter().enumerate() {
         let style = if *tab == app.health_tab {
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD)
+            let modifier = if is_focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            };
+            Style::default().fg(theme.accent).add_modifier(modifier)
         } else {
             Style::default().fg(theme.text_muted)
         };
@@ -193,4 +236,16 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         .block(block)
         .style(Style::default().bg(theme.bg_panel));
     frame.render_widget(paragraph, area);
+}
+
+fn spinner_frame(app: &App) -> &'static str {
+    if app.icons_ascii {
+        const FRAMES: [&str; 4] = ["|", "/", "-", "\\"];
+        let index = app.started_at.elapsed().as_millis() / 120;
+        FRAMES[(index as usize) % FRAMES.len()]
+    } else {
+        const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+        let index = app.started_at.elapsed().as_millis() / 80;
+        FRAMES[(index as usize) % FRAMES.len()]
+    }
 }

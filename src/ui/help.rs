@@ -28,7 +28,7 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
                     } else {
                         "l / ←"
                     },
-                    "Health tab prev",
+                    "Status tab prev",
                 ),
                 (
                     if app.icons_ascii {
@@ -36,7 +36,7 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
                     } else {
                         "; / →"
                     },
-                    "Health tab next",
+                    "Status tab next",
                 ),
             ],
         ),
@@ -49,8 +49,8 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
             vec![
                 ("Enter", "Load details"),
                 ("d", "Load deps/uses"),
-                ("i", "Install package"),
-                ("u", "Uninstall package"),
+                ("i", "Install selected (confirm)"),
+                ("u", "Uninstall selected (confirm)"),
             ],
         ),
         (
@@ -58,7 +58,7 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
             vec![
                 ("r", "Refresh leaves"),
                 ("s", "Load sizes"),
-                ("h", "Health check"),
+                ("h", "Status check"),
             ],
         ),
         (
@@ -70,7 +70,8 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
                 ("a", "Autoremove"),
                 ("b", "Bundle dump"),
                 ("v", "Toggle view"),
-                ("q / Esc", "Quit"),
+                ("q", "Quit"),
+                ("Esc", "Cancel action"),
             ],
         ),
     ];

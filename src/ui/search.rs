@@ -10,21 +10,16 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let theme = &app.theme;
 
     let search_icon = icon_label(app, "󰍉", "");
-    let install_icon = icon_label(app, "󰏗", "+");
-    let remove_icon = icon_label(app, "󰆴", "-");
 
     // Padding (replace with smarter implementation soon)
     let title_prefix = if app.icons_ascii { "" } else { " " };
     let (label, is_active) = match app.input_mode {
         InputMode::SearchLeaves => (format!("{title_prefix}{search_icon} Search leaves"), true),
         InputMode::PackageSearch => (format!("{title_prefix}{search_icon} Search packages"), true),
-        InputMode::PackageInstall => (
-            format!("{title_prefix}{install_icon} Install package"),
-            true,
+        InputMode::PackageResults => (
+            format!("{title_prefix}{search_icon} Package results"),
+            false,
         ),
-        InputMode::PackageUninstall => {
-            (format!("{title_prefix}{remove_icon} Remove package"), true)
-        }
         InputMode::Normal => (format!("{title_prefix}{search_icon} Search"), false),
     };
 
@@ -40,15 +35,18 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     };
 
     let search_value = match app.input_mode {
-        InputMode::PackageSearch | InputMode::PackageInstall | InputMode::PackageUninstall => {
-            &app.package_query
-        }
+        InputMode::PackageSearch | InputMode::PackageResults => &app.package_query,
         _ => &app.leaves_query,
     };
 
     let search_text = if search_value.is_empty() {
         if is_active {
-            Span::styled("type to filter...", Style::default().fg(theme.text_muted))
+            let hint = match app.input_mode {
+                InputMode::PackageSearch => "type to search... (Esc to lock results)",
+                InputMode::SearchLeaves => "type to filter... (Enter to lock, Esc to clear)",
+                _ => "type to filter...",
+            };
+            Span::styled(hint, Style::default().fg(theme.text_muted))
         } else {
             Span::styled(
                 "f for package, / for leaves",
