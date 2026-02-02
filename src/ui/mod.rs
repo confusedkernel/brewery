@@ -113,7 +113,7 @@ fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         frame,
         right_panels[0],
         app,
-        app.focus_panel == FocusedPanel::Health,
+        app.focus_panel == FocusedPanel::Status,
     );
     details::draw_details_panel(
         frame,

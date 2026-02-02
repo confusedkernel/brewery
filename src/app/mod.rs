@@ -1,3 +1,9 @@
+mod types;
+
+pub use types::{
+    FocusedPanel, HealthTab, IconMode, InputMode, PackageAction, PendingPackageAction, ViewMode,
+};
+
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
@@ -124,16 +130,17 @@ impl App {
     pub fn on_tick(&mut self) {
         // Always request redraw on tick for spinner animation and elapsed time updates
         self.needs_redraw = true;
-        
+
         // Decay the rapid scroll counter over time
         // This allows the counter to reset if the user pauses
-        if self.last_selection_change
+        if self
+            .last_selection_change
             .map(|t| t.elapsed() >= Duration::from_millis(300))
             .unwrap_or(true)
         {
             self.recent_selection_count = 0;
         }
-        
+
         if self.last_refresh.elapsed() >= Duration::from_secs(5) {
             self.last_refresh = Instant::now();
             self.status = "Idle".to_string();
@@ -191,8 +198,8 @@ impl App {
     pub fn cycle_focus(&mut self) {
         self.focus_panel = match self.focus_panel {
             FocusedPanel::Leaves => FocusedPanel::Sizes,
-            FocusedPanel::Sizes => FocusedPanel::Health,
-            FocusedPanel::Health => FocusedPanel::Details,
+            FocusedPanel::Sizes => FocusedPanel::Status,
+            FocusedPanel::Status => FocusedPanel::Details,
             FocusedPanel::Details => FocusedPanel::Leaves,
         };
         self.status = format!("Focus: {:?}", self.focus_panel);
@@ -228,7 +235,7 @@ impl App {
             FocusedPanel::Sizes => {
                 self.sizes_scroll_offset = self.sizes_scroll_offset.saturating_sub(1);
             }
-            FocusedPanel::Health => {
+            FocusedPanel::Status => {
                 self.health_scroll_offset = self.health_scroll_offset.saturating_sub(1);
             }
             FocusedPanel::Details => {
@@ -244,7 +251,7 @@ impl App {
                 let max_scroll = self.sizes.len().saturating_sub(1);
                 self.sizes_scroll_offset = (self.sizes_scroll_offset + 1).min(max_scroll);
             }
-            FocusedPanel::Health => {
+            FocusedPanel::Status => {
                 let max_scroll = self.max_health_scroll();
                 self.health_scroll_offset = (self.health_scroll_offset + 1).min(max_scroll);
             }
@@ -410,7 +417,7 @@ impl App {
 
     pub fn update_filtered_leaves(&mut self) {
         self.filtered_leaves_dirty = false;
-        
+
         if self.leaves_query.is_empty() {
             self.filtered_leaves = (0..self.leaves.len()).collect();
             if self.leaves.is_empty() {
@@ -672,7 +679,12 @@ impl App {
         self.needs_redraw = true;
     }
 
-    pub fn request_command(&mut self, label: &str, args: &[&str], tx: &mpsc::UnboundedSender<CommandMessage>) {
+    pub fn request_command(
+        &mut self,
+        label: &str,
+        args: &[&str],
+        tx: &mpsc::UnboundedSender<CommandMessage>,
+    ) {
         if self.pending_command {
             return;
         }
@@ -770,33 +782,6 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum InputMode {
-    Normal,
-    SearchLeaves,
-    PackageSearch,
-    PackageResults,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum IconMode {
-    Auto,
-    Nerd,
-    Ascii,
-}
-
-#[derive(Clone, PartialEq)]
-pub enum PackageAction {
-    Install,
-    Uninstall,
-}
-
-#[derive(Clone, PartialEq)]
-pub struct PendingPackageAction {
-    pub action: PackageAction,
-    pub pkg: String,
-}
-
 fn detect_icon_ascii() -> bool {
     if let Ok(value) = std::env::var("BREWERY_ASCII") {
         if value == "1" || value.eq_ignore_ascii_case("true") {
@@ -804,26 +789,4 @@ fn detect_icon_ascii() -> bool {
         }
     }
     false
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum ViewMode {
-    Details,
-    PackageResults,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum FocusedPanel {
-    Leaves,
-    Sizes,
-    Health,
-    Details,
-}
-
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum HealthTab {
-    #[default]
-    Activity,
-    Issues,
-    Outdated,
 }
