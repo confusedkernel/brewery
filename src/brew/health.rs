@@ -29,7 +29,11 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
     // Process version result
     if let Ok(result) = version_result {
         if result.success {
-            let mut lines = result.stdout.lines().map(|s| s.trim()).filter(|s| !s.is_empty());
+            let mut lines = result
+                .stdout
+                .lines()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
             status.brew_version = lines.next().map(str::to_string);
         }
     }

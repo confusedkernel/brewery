@@ -11,7 +11,10 @@ pub struct CommandMessage {
 }
 
 pub async fn run_brew_command(args: &[&str]) -> anyhow::Result<CommandResult> {
-    let output = tokio::process::Command::new("brew").args(args).output().await?;
+    let output = tokio::process::Command::new("brew")
+        .args(args)
+        .output()
+        .await?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 

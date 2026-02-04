@@ -1,12 +1,11 @@
-mod details;
-mod leaves;
 mod commands;
-mod size;
+mod details;
 mod health;
+mod leaves;
+mod size;
 
-pub use details::{fetch_details_basic, fetch_details_full, Details, DetailsLoad, DetailsMessage};
-pub use leaves::{fetch_leaves, LeavesMessage};
-pub use commands::{run_brew_command, CommandMessage};
-pub use size::{fetch_sizes, SizeEntry, SizesMessage};
-pub use health::{fetch_health, HealthStatus, HealthMessage};
-
+pub use commands::{CommandMessage, run_brew_command};
+pub use details::{Details, DetailsLoad, DetailsMessage, fetch_details_basic, fetch_details_full};
+pub use health::{HealthMessage, HealthStatus, fetch_health};
+pub use leaves::{LeavesMessage, fetch_leaves};
+pub use size::{SizeEntry, SizesMessage, fetch_sizes};

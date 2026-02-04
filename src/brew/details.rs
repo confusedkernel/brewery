@@ -85,7 +85,10 @@ pub async fn fetch_details_full(pkg: &str) -> anyhow::Result<Details> {
 }
 
 async fn run_brew_lines_async<const N: usize>(args: [&str; N]) -> anyhow::Result<Vec<String>> {
-    let output = tokio::process::Command::new("brew").args(args).output().await?;
+    let output = tokio::process::Command::new("brew")
+        .args(args)
+        .output()
+        .await?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let message = if stderr.is_empty() {

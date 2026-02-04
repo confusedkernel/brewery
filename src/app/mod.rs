@@ -11,11 +11,11 @@ use lru::LruCache;
 use tokio::sync::mpsc;
 
 use crate::brew::{
-    fetch_details_basic, fetch_details_full, fetch_health, fetch_leaves, fetch_sizes,
-    run_brew_command, CommandMessage, Details, DetailsLoad, DetailsMessage, HealthMessage,
-    HealthStatus, LeavesMessage, SizeEntry, SizesMessage,
+    CommandMessage, Details, DetailsLoad, DetailsMessage, HealthMessage, HealthStatus,
+    LeavesMessage, SizeEntry, SizesMessage, fetch_details_basic, fetch_details_full, fetch_health,
+    fetch_leaves, fetch_sizes, run_brew_command,
 };
-use crate::theme::{detect_system_theme, Theme, ThemeMode};
+use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
 /// Maximum number of package details to cache
 const DETAILS_CACHE_CAPACITY: usize = 64;
@@ -188,10 +188,7 @@ impl App {
             IconMode::Nerd => false,
             IconMode::Auto => detect_icon_ascii(),
         };
-        self.status = format!(
-            "Icons: {}",
-            if self.icons_ascii { "ASCII" } else { "Nerd" }
-        );
+        self.status = format!("Icons: {}", if self.icons_ascii { "ASCII" } else { "Nerd" });
         self.last_refresh = Instant::now();
     }
 
@@ -282,7 +279,10 @@ impl App {
 
         let mut count = 0;
         if self.pending_command
-            && matches!(self.last_command.as_deref(), Some("install") | Some("uninstall"))
+            && matches!(
+                self.last_command.as_deref(),
+                Some("install") | Some("uninstall")
+            )
         {
             count += 1 + self.last_command_output.len();
             if self.last_command_target.is_some() {
@@ -375,7 +375,10 @@ impl App {
     }
 
     pub fn selected_package_name(&self) -> Option<&str> {
-        if matches!(self.input_mode, InputMode::PackageSearch | InputMode::PackageResults) {
+        if matches!(
+            self.input_mode,
+            InputMode::PackageSearch | InputMode::PackageResults
+        ) {
             self.selected_package_result()
         } else {
             self.selected_leaf()

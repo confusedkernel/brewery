@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::size;
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use crate::app::App;
 use crate::runtime::input::handle_key_event;

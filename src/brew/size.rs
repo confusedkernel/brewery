@@ -58,7 +58,10 @@ fn parse_du_line(line: &str) -> Option<SizeEntry> {
     let name = PathBuf::from(path)
         .file_name()
         .map(|os| os.to_string_lossy().to_string())?;
-    Some(SizeEntry { name, size_kb: size })
+    Some(SizeEntry {
+        name,
+        size_kb: size,
+    })
 }
 
 async fn fetch_cellar_path() -> anyhow::Result<PathBuf> {
