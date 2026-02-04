@@ -50,12 +50,13 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 let items = if app.pending_command
                     && matches!(
                         app.last_command.as_deref(),
-                        Some("install") | Some("uninstall")
+                        Some("install") | Some("uninstall") | Some("upgrade")
                     ) {
                     let spinner = spinner_frame(app);
                     let action = match app.last_command.as_deref() {
                         Some("install") => "Installing",
                         Some("uninstall") => "Uninstalling",
+                        Some("upgrade") => "Upgrading",
                         _ => "Running",
                     };
                     let label = app
@@ -87,6 +88,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                         let verb = match label.as_str() {
                             "install" => "Install",
                             "uninstall" => "Uninstall",
+                            "upgrade" => "Upgrade",
                             _ => "Command",
                         };
                         vec![(format!("{verb} completed: {pkg}"), theme.green)]

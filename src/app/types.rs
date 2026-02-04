@@ -17,6 +17,7 @@ pub enum IconMode {
 pub enum PackageAction {
     Install,
     Uninstall,
+    Upgrade,
 }
 
 #[derive(Clone, PartialEq)]

@@ -148,6 +148,35 @@ pub fn handle_key_event(
                     app.last_refresh = Instant::now();
                 }
             }
+            KeyCode::Char('U') => {
+                if app.focus_panel == FocusedPanel::Leaves {
+                    let Some(pkg) = app.selected_leaf().map(str::to_string) else {
+                        app.status = "No leaf selected".to_string();
+                        app.last_refresh = Instant::now();
+                        return None;
+                    };
+
+                    let action = PackageAction::Upgrade;
+                    if matches!(app.pending_package_action.as_ref(),
+                        Some(pending) if pending.action == action && pending.pkg == pkg)
+                    {
+                        app.request_command("upgrade", &["upgrade", &pkg], &channels.command_tx);
+                        app.pending_package_action = None;
+                        app.status = "Upgrading...".to_string();
+                        app.last_refresh = Instant::now();
+                    } else {
+                        app.pending_package_action = Some(PendingPackageAction {
+                            action,
+                            pkg: pkg.clone(),
+                        });
+                        app.status = format!("Upgrade {pkg}? [U] confirm, [Esc] cancel");
+                        app.last_refresh = Instant::now();
+                    }
+                } else {
+                    app.status = "Focus leaves to upgrade".to_string();
+                    app.last_refresh = Instant::now();
+                }
+            }
             KeyCode::Char('c') => {
                 app.request_command("cleanup", &["cleanup", "-s"], &channels.command_tx);
             }

@@ -692,7 +692,7 @@ impl App {
         self.pending_command = true;
         self.last_command = Some(label.to_string());
         self.last_command_target = match label {
-            "install" | "uninstall" => args.last().map(|value| (*value).to_string()),
+            "install" | "uninstall" | "upgrade" => args.last().map(|value| (*value).to_string()),
             _ => None,
         };
         self.command_started_at = Some(Instant::now());
@@ -750,7 +750,7 @@ impl App {
                     self.last_result_details_pkg = None;
                 }
 
-                if matches!(message.label.as_str(), "install" | "uninstall") {
+                if matches!(message.label.as_str(), "install" | "uninstall" | "upgrade") {
                     if let Some(pkg) = self.last_command_target.clone() {
                         self.last_command_completed =
                             Some((message.label.clone(), pkg, Instant::now()));
