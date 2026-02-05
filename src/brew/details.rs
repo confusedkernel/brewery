@@ -2,6 +2,7 @@
 pub struct Details {
     pub desc: Option<String>,
     pub homepage: Option<String>,
+    pub latest: Option<String>,
     pub installed: Vec<String>,
     pub deps: Option<Vec<String>>,
     pub uses: Option<Vec<String>>,
@@ -29,8 +30,14 @@ struct BrewInfo {
 struct FormulaInfo {
     desc: Option<String>,
     homepage: Option<String>,
+    versions: Option<FormulaVersions>,
     #[serde(default)]
     installed: Vec<InstalledInfo>,
+}
+
+#[derive(serde::Deserialize)]
+struct FormulaVersions {
+    stable: Option<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -69,6 +76,10 @@ pub async fn fetch_details_basic(pkg: &str) -> anyhow::Result<Details> {
     Ok(Details {
         desc: formula.desc.clone(),
         homepage: formula.homepage.clone(),
+        latest: formula
+            .versions
+            .as_ref()
+            .and_then(|versions| versions.stable.clone()),
         installed,
         deps: None,
         uses: None,

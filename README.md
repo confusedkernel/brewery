@@ -68,6 +68,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | ------- | ------------------------------------------ |
 | `i`     | Install package (press twice to confirm)   |
 | `u`     | Uninstall package (press twice to confirm) |
+| `Shift+U` | Upgrade package (press twice to confirm)   |
 | `Enter` | Load package details                       |
 | `d`     | Load dependencies and reverse dependencies |
 

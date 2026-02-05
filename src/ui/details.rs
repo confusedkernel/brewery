@@ -150,6 +150,13 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             Style::default().fg(theme.green),
         )));
 
+        if let Some(latest) = details.latest.as_ref() {
+            lines.push(Line::from(Span::styled(
+                format!("  Latest: {latest}"),
+                Style::default().fg(theme.text_secondary),
+            )));
+        }
+
         if let Some(deps) = details.deps.as_ref() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(

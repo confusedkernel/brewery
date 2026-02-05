@@ -776,6 +776,7 @@ impl App {
 fn merge_details(existing: &mut Details, incoming: &Details) {
     existing.desc = incoming.desc.clone();
     existing.homepage = incoming.homepage.clone();
+    existing.latest = incoming.latest.clone();
     existing.installed = incoming.installed.clone();
     if incoming.deps.is_some() {
         existing.deps = incoming.deps.clone();
