@@ -47,7 +47,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 }
             }
             HealthTab::Activity => {
-                let items = if app.pending_command
+                let mut items = if app.pending_command
                     && matches!(
                         app.last_command.as_deref(),
                         Some("install") | Some("uninstall") | Some("upgrade")
@@ -99,11 +99,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                     Vec::new()
                 };
 
-                if !items.is_empty() {
-                    items
-                } else {
-                    let mut items = Vec::new();
-
+                if items.is_empty() {
                     if let Some(ver) = &health.brew_version {
                         let sep = symbol(app, "·", "|");
                         let info = health
@@ -161,9 +157,19 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                     if let Some(cmd) = &app.last_command {
                         items.push((format!("Last cmd: {}", cmd), theme.text_secondary));
                     }
-
-                    items
                 }
+
+                if !app.pending_command {
+                    if let Some(error) = app.last_command_error.as_ref() {
+                        let label = app.last_command.as_deref().unwrap_or("command");
+                        items.push((format!("Last cmd failed: {label}"), theme.red));
+                        for line in error.lines().take(6) {
+                            items.push((format!("> {line}"), theme.red));
+                        }
+                    }
+                }
+
+                items
             }
         };
 

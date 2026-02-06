@@ -55,7 +55,17 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         received_message = true;
     }
     while let Ok(message) = channels.command_rx.try_recv() {
+        let should_refresh_leaves = match &message.result {
+            Ok(result) => {
+                result.success
+                    && matches!(message.label.as_str(), "install" | "uninstall" | "upgrade")
+            }
+            Err(_) => false,
+        };
         app.apply_command_message(message);
+        if should_refresh_leaves {
+            app.request_leaves(&channels.leaves_tx);
+        }
         received_message = true;
     }
     while let Ok(message) = channels.health_rx.try_recv() {

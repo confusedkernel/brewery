@@ -718,10 +718,16 @@ impl App {
     pub fn apply_command_message(&mut self, message: CommandMessage) {
         match message.result {
             Ok(result) => {
-                let lines: Vec<String> = if result.stdout.trim().is_empty() {
-                    result.stderr.lines().map(str::to_string).collect()
-                } else {
+                let lines: Vec<String> = if result.success {
+                    if result.stdout.trim().is_empty() {
+                        result.stderr.lines().map(str::to_string).collect()
+                    } else {
+                        result.stdout.lines().map(str::to_string).collect()
+                    }
+                } else if result.stderr.trim().is_empty() {
                     result.stdout.lines().map(str::to_string).collect()
+                } else {
+                    result.stderr.lines().map(str::to_string).collect()
                 };
                 self.last_command_output = lines.into_iter().take(8).collect();
                 if result.success {
@@ -753,7 +759,9 @@ impl App {
                     self.last_result_details_pkg = None;
                 }
 
-                if matches!(message.label.as_str(), "install" | "uninstall" | "upgrade") {
+                if result.success
+                    && matches!(message.label.as_str(), "install" | "uninstall" | "upgrade")
+                {
                     if let Some(pkg) = self.last_command_target.clone() {
                         self.last_command_completed =
                             Some((message.label.clone(), pkg, Instant::now()));
