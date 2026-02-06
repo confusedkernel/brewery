@@ -55,16 +55,26 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         received_message = true;
     }
     while let Ok(message) = channels.command_rx.try_recv() {
-        let should_refresh_leaves = match &message.result {
+        let mut should_refresh_leaves = false;
+        let mut refresh_details_pkg = None;
+        match &message.result {
             Ok(result) => {
-                result.success
-                    && matches!(message.label.as_str(), "install" | "uninstall" | "upgrade")
+                if result.success {
+                    should_refresh_leaves =
+                        matches!(message.label.as_str(), "install" | "uninstall" | "upgrade");
+                    if message.label == "upgrade" {
+                        refresh_details_pkg = app.last_command_target.clone();
+                    }
+                }
             }
-            Err(_) => false,
-        };
+            Err(_) => {}
+        }
         app.apply_command_message(message);
         if should_refresh_leaves {
             app.request_leaves(&channels.leaves_tx);
+        }
+        if let Some(pkg) = refresh_details_pkg {
+            app.request_details_forced(&pkg, DetailsLoad::Basic, &channels.details_tx);
         }
         received_message = true;
     }

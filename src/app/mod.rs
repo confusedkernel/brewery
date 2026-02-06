@@ -540,6 +540,25 @@ impl App {
         load: DetailsLoad,
         tx: &mpsc::UnboundedSender<DetailsMessage>,
     ) {
+        self.request_details_for_inner(pkg, load, tx, false);
+    }
+
+    pub fn request_details_forced(
+        &mut self,
+        pkg: &str,
+        load: DetailsLoad,
+        tx: &mpsc::UnboundedSender<DetailsMessage>,
+    ) {
+        self.request_details_for_inner(pkg, load, tx, true);
+    }
+
+    fn request_details_for_inner(
+        &mut self,
+        pkg: &str,
+        load: DetailsLoad,
+        tx: &mpsc::UnboundedSender<DetailsMessage>,
+        force: bool,
+    ) {
         let pkg = pkg.to_string();
 
         if let Some(pending) = self.pending_details.as_ref() {
@@ -548,12 +567,14 @@ impl App {
             }
         }
 
-        if let Some(existing) = self.details_cache.get(&pkg) {
-            match load {
-                DetailsLoad::Basic => return,
-                DetailsLoad::Full => {
-                    if existing.deps.is_some() && existing.uses.is_some() {
-                        return;
+        if !force {
+            if let Some(existing) = self.details_cache.get(&pkg) {
+                match load {
+                    DetailsLoad::Basic => return,
+                    DetailsLoad::Full => {
+                        if existing.deps.is_some() && existing.uses.is_some() {
+                            return;
+                        }
                     }
                 }
             }

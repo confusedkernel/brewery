@@ -12,7 +12,7 @@ use crate::runtime::messages::{create_channels, handle_auto_details, process_pen
 use crate::ui::{draw, help};
 
 /// Tick rate for the main event loop
-const TICK_RATE: Duration = Duration::from_millis(500);
+const TICK_RATE: Duration = Duration::from_millis(250);
 
 /// Debounce delay for auto-fetching details when selection changes.
 /// This prevents rapid-fire requests when scrolling quickly through lists.
