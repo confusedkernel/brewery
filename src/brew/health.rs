@@ -1,5 +1,7 @@
 use crate::brew::run_brew_command;
 use std::collections::HashSet;
+use std::path::PathBuf;
+use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default)]
 pub struct HealthStatus {
@@ -9,6 +11,8 @@ pub struct HealthStatus {
     pub outdated_packages: Vec<String>,
     pub brew_version: Option<String>,
     pub brew_info: Option<String>,
+    pub brew_update_status: Option<String>,
+    pub last_brew_update_secs_ago: Option<u64>,
 }
 
 pub struct HealthMessage {
@@ -18,12 +22,21 @@ pub struct HealthMessage {
 pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
     let mut status = HealthStatus::default();
 
-    // Run independent commands in parallel (version, info, leaves, doctor)
-    let (version_result, info_result, leaves_result, doctor_result) = tokio::join!(
+    // Run independent commands in parallel (version, info, leaves, doctor, repo paths)
+    let (
+        version_result,
+        info_result,
+        leaves_result,
+        doctor_result,
+        brew_repo_result,
+        core_repo_result,
+    ) = tokio::join!(
         run_brew_command(&["--version"]),
         run_brew_command(&["info"]),
         run_brew_command(&["leaves"]),
         run_brew_command(&["doctor"]),
+        run_brew_command(&["--repository"]),
+        run_brew_command(&["--repository", "homebrew/core"]),
     );
 
     // Process version result
@@ -69,6 +82,29 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
         }
     }
 
+    // Process last brew update time from repository metadata
+    let mut repo_paths = Vec::new();
+    if let Ok(result) = brew_repo_result {
+        if result.success {
+            if let Some(path) = first_nonempty_line(&result.stdout) {
+                repo_paths.push(path.to_string());
+            }
+        }
+    }
+    if let Ok(result) = core_repo_result {
+        if result.success {
+            if let Some(path) = first_nonempty_line(&result.stdout) {
+                repo_paths.push(path.to_string());
+            }
+        }
+    }
+    status.last_brew_update_secs_ago = last_update_secs_ago(&repo_paths);
+    status.brew_update_status = Some(match status.last_brew_update_secs_ago {
+        Some(secs) if secs <= 86_400 => "Up to date".to_string(),
+        Some(_) => "Update recommended".to_string(),
+        None => "Unknown".to_string(),
+    });
+
     // Build leaf set from leaves result
     let leaf_set: HashSet<String> = match leaves_result {
         Ok(result) => result
@@ -94,4 +130,23 @@ pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
     }
 
     Ok(status)
+}
+
+fn first_nonempty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
+    let mut latest: Option<SystemTime> = None;
+
+    for repo in repo_paths {
+        let fetch_head = PathBuf::from(repo).join(".git").join("FETCH_HEAD");
+        if let Ok(metadata) = std::fs::metadata(fetch_head) {
+            if let Ok(modified) = metadata.modified() {
+                latest = Some(latest.map(|current| current.max(modified)).unwrap_or(modified));
+            }
+        }
+    }
+
+    latest.and_then(|time| time.elapsed().ok().map(|elapsed| elapsed.as_secs()))
 }

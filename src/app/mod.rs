@@ -301,6 +301,12 @@ impl App {
             count += 1;
         }
         count += 2; // doctor + packages
+        if health.brew_update_status.is_some() {
+            count += 1;
+        }
+        if health.last_brew_update_secs_ago.is_some() {
+            count += 1;
+        }
         if self.last_health_check.is_some() {
             count += 1;
         }

@@ -136,6 +136,21 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                         outdated_status.1,
                     ));
 
+                    if let Some(update_status) = health.brew_update_status.as_ref() {
+                        let color = match update_status.as_str() {
+                            "Up to date" => theme.green,
+                            "Update recommended" => theme.orange,
+                            _ => theme.text_muted,
+                        };
+                        items.push((format!("Brew update: {update_status}"), color));
+                    }
+                    if let Some(secs) = health.last_brew_update_secs_ago {
+                        items.push((
+                            format!("Last brew update: {} ago", format_elapsed(secs)),
+                            theme.text_muted,
+                        ));
+                    }
+
                     if let Some(t) = app.last_health_check {
                         items.push((
                             format!("Last check: {}s ago", t.elapsed().as_secs()),
@@ -262,4 +277,17 @@ fn spinner_frame(app: &App) -> &'static str {
         let index = app.started_at.elapsed().as_millis() / 80;
         FRAMES[(index as usize) % FRAMES.len()]
     }
+}
+
+fn format_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        return format!("{secs}s");
+    }
+    if secs < 3600 {
+        return format!("{}m", secs / 60);
+    }
+    if secs < 86_400 {
+        return format!("{}h", secs / 3600);
+    }
+    format!("{}d", secs / 86_400)
 }
