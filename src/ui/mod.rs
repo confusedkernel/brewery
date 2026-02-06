@@ -64,7 +64,7 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
             Style::default().fg(theme.text_muted),
         ),
         Span::raw("  "),
-        Span::styled(&app.status, Style::default().fg(theme.green)),
+        Span::styled(&app.status, Style::default().fg(theme.text_secondary)),
         Span::raw("  "),
         Span::styled(
             format!("[{}] {}s", theme_indicator, uptime),

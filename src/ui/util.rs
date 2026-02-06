@@ -9,7 +9,11 @@ pub fn icon_label(app: &App, nerd: &str, ascii: &str) -> String {
 }
 
 pub fn symbol<'a>(app: &App, nerd: &'a str, ascii: &'a str) -> &'a str {
-    if app.icons_ascii { ascii } else { nerd }
+    if app.icons_ascii {
+        ascii
+    } else {
+        nerd
+    }
 }
 
 pub fn format_size(size_kb: u64) -> String {

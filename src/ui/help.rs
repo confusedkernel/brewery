@@ -51,7 +51,8 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
                 ("d", "Load deps/uses"),
                 ("i", "Install selected (confirm)"),
                 ("u", "Uninstall selected (confirm)"),
-                ("U", "Upgrade selected (confirm)"),
+                ("U", "Upgrade selected or all outdated (confirm)"),
+                ("o", "Toggle outdated-only leaves filter"),
             ],
         ),
         (

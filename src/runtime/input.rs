@@ -4,7 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, ViewMode};
 use crate::brew::DetailsLoad;
-use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
+use crate::runtime::messages::{handle_focus_backtab, RuntimeChannels};
 
 pub fn handle_key_event(
     app: &mut App,
@@ -53,6 +53,11 @@ pub fn handle_key_event(
             KeyCode::Esc => {
                 if app.pending_package_action.is_some() {
                     app.pending_package_action = None;
+                    app.pending_upgrade_all_outdated = false;
+                    app.status = "Canceled".to_string();
+                    app.last_refresh = Instant::now();
+                } else if app.pending_upgrade_all_outdated {
+                    app.pending_upgrade_all_outdated = false;
                     app.status = "Canceled".to_string();
                     app.last_refresh = Instant::now();
                 } else if !app.leaves_query.is_empty() {
@@ -78,6 +83,14 @@ pub fn handle_key_event(
                 app.update_filtered_leaves();
                 app.status = "Search".to_string();
                 app.last_refresh = std::time::Instant::now();
+            }
+            KeyCode::Char('o') => {
+                app.pending_package_action = None;
+                app.pending_upgrade_all_outdated = false;
+                app.toggle_outdated_filter();
+                if app.leaves_outdated_only && app.health.is_none() && !app.pending_health {
+                    app.request_health(&channels.health_tx);
+                }
             }
             KeyCode::Char('f') => {
                 app.input_mode = InputMode::PackageSearch;
@@ -149,7 +162,35 @@ pub fn handle_key_event(
                 }
             }
             KeyCode::Char('U') => {
-                if app.focus_panel == FocusedPanel::Leaves {
+                if app.focus_panel == FocusedPanel::Status
+                    && app.health_tab == crate::app::HealthTab::Outdated
+                {
+                    let outdated = app
+                        .health
+                        .as_ref()
+                        .map(|h| h.outdated_packages.len())
+                        .unwrap_or(0);
+                    if outdated == 0 {
+                        app.status = "No outdated packages".to_string();
+                        app.last_refresh = Instant::now();
+                        return None;
+                    }
+
+                    if app.pending_upgrade_all_outdated {
+                        app.request_command("upgrade-all", &["upgrade"], &channels.command_tx);
+                        app.pending_upgrade_all_outdated = false;
+                        app.pending_package_action = None;
+                        app.status = format!("Upgrading {outdated} outdated packages...");
+                        app.last_refresh = Instant::now();
+                    } else {
+                        app.pending_upgrade_all_outdated = true;
+                        app.pending_package_action = None;
+                        app.status = format!(
+                            "Upgrade all {outdated} outdated packages? [U] confirm, [Esc] cancel"
+                        );
+                        app.last_refresh = Instant::now();
+                    }
+                } else if app.focus_panel == FocusedPanel::Leaves {
                     let Some(pkg) = app.selected_leaf().map(str::to_string) else {
                         app.status = "No leaf selected".to_string();
                         app.last_refresh = Instant::now();
@@ -204,6 +245,7 @@ pub fn handle_key_event(
                 app.scroll_focused_up();
                 if app.focus_panel == FocusedPanel::Leaves {
                     app.pending_package_action = None;
+                    app.pending_upgrade_all_outdated = false;
                     app.on_selection_change();
                 }
             }
@@ -211,6 +253,7 @@ pub fn handle_key_event(
                 app.scroll_focused_down();
                 if app.focus_panel == FocusedPanel::Leaves {
                     app.pending_package_action = None;
+                    app.pending_upgrade_all_outdated = false;
                     app.on_selection_change();
                 }
             }

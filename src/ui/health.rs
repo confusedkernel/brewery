@@ -3,7 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::{App, HealthTab};
+use crate::app::{App, HealthTab, ToastLevel};
 use crate::ui::util::symbol;
 
 pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
@@ -50,13 +50,14 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 let mut items = if app.pending_command
                     && matches!(
                         app.last_command.as_deref(),
-                        Some("install") | Some("uninstall") | Some("upgrade")
+                        Some("install") | Some("uninstall") | Some("upgrade") | Some("upgrade-all")
                     ) {
                     let spinner = spinner_frame(app);
                     let action = match app.last_command.as_deref() {
                         Some("install") => "Installing",
                         Some("uninstall") => "Uninstalling",
                         Some("upgrade") => "Upgrading",
+                        Some("upgrade-all") => "Upgrading outdated packages",
                         _ => "Running",
                     };
                     let label = app
@@ -75,6 +76,8 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                             format!("Command: brew {command} {target}"),
                             theme.text_muted,
                         ));
+                    } else if app.last_command.as_deref() == Some("upgrade-all") {
+                        items.push(("Command: brew upgrade".to_string(), theme.text_muted));
                     }
                     items.extend(
                         app.last_command_output
@@ -89,6 +92,7 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                             "install" => "Install",
                             "uninstall" => "Uninstall",
                             "upgrade" => "Upgrade",
+                            "upgrade-all" => "Upgrade all outdated",
                             _ => "Command",
                         };
                         vec![(format!("{verb} completed: {pkg}"), theme.green)]
@@ -175,6 +179,20 @@ pub fn draw_health_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 }
 
                 if !app.pending_command {
+                    if let Some(toast) = app.toast.as_ref() {
+                        let (label, color) = match toast.level {
+                            ToastLevel::Success => (
+                                format!("{} {}", symbol(app, "✓", "ok"), toast.message),
+                                theme.green,
+                            ),
+                            ToastLevel::Error => (
+                                format!("{} {}", symbol(app, "✗", "x"), toast.message),
+                                theme.red,
+                            ),
+                        };
+                        items.insert(0, (label, color));
+                    }
+
                     if let Some(error) = app.last_command_error.as_ref() {
                         let label = app.last_command.as_deref().unwrap_or("command");
                         items.push((format!("Last cmd failed: {label}"), theme.red));

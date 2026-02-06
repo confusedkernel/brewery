@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum InputMode {
     Normal,
@@ -46,4 +48,17 @@ pub enum HealthTab {
     Activity,
     Issues,
     Outdated,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum ToastLevel {
+    Success,
+    Error,
+}
+
+#[derive(Clone)]
+pub struct Toast {
+    pub level: ToastLevel,
+    pub message: String,
+    pub created_at: Instant,
 }

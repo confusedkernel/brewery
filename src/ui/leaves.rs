@@ -34,18 +34,37 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         (title, items, app.package_results_selected)
     } else {
         let leaves = app.filtered_leaves();
-        let title = format!(" Leaves ({})", leaves.len());
+        let filter_suffix = if app.leaves_outdated_only {
+            format!(" {} outdated", symbol(app, "·", "|"))
+        } else {
+            String::new()
+        };
+        let title = format!(" Leaves ({}){}", leaves.len(), filter_suffix);
         let items = if leaves.is_empty() {
+            let empty_label = if app.leaves_outdated_only {
+                if app.health.is_some() {
+                    "  No outdated leaves"
+                } else {
+                    "  No outdated data yet (press h)"
+                }
+            } else {
+                "  No leaves found"
+            };
             vec![ListItem::new(Line::from(Span::styled(
-                "  No leaves found",
+                empty_label,
                 Style::default().fg(theme.text_muted),
             )))]
         } else {
             leaves
                 .iter()
                 .map(|(_, item)| {
+                    let marker = if app.is_outdated_leaf(item) {
+                        format!("{} ", symbol(app, "↑", "^"))
+                    } else {
+                        String::new()
+                    };
                     ListItem::new(Line::from(Span::styled(
-                        format!(" {}", item),
+                        format!(" {marker}{item}"),
                         Style::default().fg(theme.text_primary),
                     )))
                 })

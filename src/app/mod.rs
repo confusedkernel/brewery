@@ -1,7 +1,8 @@
 mod types;
 
 pub use types::{
-    FocusedPanel, HealthTab, IconMode, InputMode, PackageAction, PendingPackageAction, ViewMode,
+    FocusedPanel, HealthTab, IconMode, InputMode, PackageAction, PendingPackageAction, Toast,
+    ToastLevel, ViewMode,
 };
 
 use std::num::NonZeroUsize;
@@ -19,11 +20,13 @@ use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
 /// Maximum number of package details to cache
 const DETAILS_CACHE_CAPACITY: usize = 64;
+const TOAST_DURATION: Duration = Duration::from_secs(5);
 
 pub struct App {
     pub started_at: Instant,
     pub last_refresh: Instant,
     pub status: String,
+    pub toast: Option<Toast>,
     pub theme_mode: ThemeMode,
     pub theme: Theme,
     pub input_mode: InputMode,
@@ -53,6 +56,7 @@ pub struct App {
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,
     pub pending_package_action: Option<PendingPackageAction>,
+    pub pending_upgrade_all_outdated: bool,
     pub pending_leaves: bool,
     pub last_leaves_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
@@ -64,6 +68,7 @@ pub struct App {
     pub pending_health: bool,
     pub last_health_check: Option<Instant>,
     pub health_tab: HealthTab,
+    pub leaves_outdated_only: bool,
     pub show_help_popup: bool,
     pub help_scroll_offset: usize,
     pub needs_redraw: bool,
@@ -79,6 +84,7 @@ impl App {
             started_at: Instant::now(),
             last_refresh: Instant::now(),
             status: "Ready".to_string(),
+            toast: None,
             theme_mode: ThemeMode::Auto,
             theme,
             input_mode: InputMode::Normal,
@@ -108,6 +114,7 @@ impl App {
             last_command_error: None,
             last_error: None,
             pending_package_action: None,
+            pending_upgrade_all_outdated: false,
             pending_leaves: false,
             last_leaves_refresh: None,
             last_sizes_refresh: None,
@@ -119,6 +126,7 @@ impl App {
             pending_health: false,
             last_health_check: None,
             health_tab: HealthTab::default(),
+            leaves_outdated_only: false,
             show_help_popup: false,
             help_scroll_offset: 0,
             needs_redraw: true,
@@ -144,6 +152,15 @@ impl App {
         if self.last_refresh.elapsed() >= Duration::from_secs(5) {
             self.last_refresh = Instant::now();
             self.status = "Idle".to_string();
+        }
+
+        if self
+            .toast
+            .as_ref()
+            .map(|toast| toast.created_at.elapsed() > TOAST_DURATION)
+            .unwrap_or(false)
+        {
+            self.toast = None;
         }
     }
 
@@ -281,7 +298,7 @@ impl App {
         if self.pending_command
             && matches!(
                 self.last_command.as_deref(),
-                Some("install") | Some("uninstall")
+                Some("install") | Some("uninstall") | Some("upgrade") | Some("upgrade-all")
             )
         {
             count += 1 + self.last_command_output.len();
@@ -375,6 +392,24 @@ impl App {
             .collect()
     }
 
+    pub fn is_outdated_leaf(&self, pkg: &str) -> bool {
+        self.health
+            .as_ref()
+            .map(|health| health.outdated_packages.iter().any(|name| name == pkg))
+            .unwrap_or(false)
+    }
+
+    pub fn toggle_outdated_filter(&mut self) {
+        self.leaves_outdated_only = !self.leaves_outdated_only;
+        self.update_filtered_leaves();
+        if self.leaves_outdated_only {
+            self.status = "Filter: outdated only".to_string();
+        } else {
+            self.status = "Filter: all leaves".to_string();
+        }
+        self.last_refresh = Instant::now();
+    }
+
     pub fn selected_package_result(&self) -> Option<&str> {
         let selected = self.package_results_selected?;
         self.package_results.get(selected).map(String::as_str)
@@ -427,28 +462,15 @@ impl App {
     pub fn update_filtered_leaves(&mut self) {
         self.filtered_leaves_dirty = false;
 
-        if self.leaves_query.is_empty() {
-            self.filtered_leaves = (0..self.leaves.len()).collect();
-            if self.leaves.is_empty() {
-                self.selected_index = None;
-            } else if self.selected_index.is_none() {
-                self.selected_index = Some(0);
-            } else if self
-                .selected_index
-                .map(|idx| idx >= self.leaves.len())
-                .unwrap_or(true)
-            {
-                self.selected_index = Some(0);
-            }
-            return;
-        }
-
         let needle = self.leaves_query.to_lowercase();
         self.filtered_leaves = self
             .leaves
             .iter()
             .enumerate()
-            .filter(|(_, item)| item.to_lowercase().contains(&needle))
+            .filter(|(_, item)| !self.leaves_outdated_only || self.is_outdated_leaf(item))
+            .filter(|(_, item)| {
+                self.leaves_query.is_empty() || item.to_lowercase().contains(&needle)
+            })
             .map(|(idx, _)| idx)
             .collect();
 
@@ -471,19 +493,6 @@ impl App {
     }
 
     pub fn select_next(&mut self) {
-        if self.leaves_query.is_empty() {
-            if self.leaves.is_empty() {
-                self.selected_index = None;
-                return;
-            }
-            let next = match self.selected_index {
-                Some(idx) => (idx + 1).min(self.leaves.len() - 1),
-                None => 0,
-            };
-            self.selected_index = Some(next);
-            return;
-        }
-
         if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
@@ -500,19 +509,6 @@ impl App {
     }
 
     pub fn select_prev(&mut self) {
-        if self.leaves_query.is_empty() {
-            if self.leaves.is_empty() {
-                self.selected_index = None;
-                return;
-            }
-            let prev = match self.selected_index {
-                Some(idx) => idx.saturating_sub(1),
-                None => 0,
-            };
-            self.selected_index = Some(prev);
-            return;
-        }
-
         if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
@@ -692,6 +688,7 @@ impl App {
         match message.result {
             Ok(health) => {
                 self.health = Some(health);
+                self.update_filtered_leaves();
                 let max_scroll = self.max_health_scroll();
                 self.health_scroll_offset = self.health_scroll_offset.min(max_scroll);
                 self.last_error = None;
@@ -743,6 +740,8 @@ impl App {
     }
 
     pub fn apply_command_message(&mut self, message: CommandMessage) {
+        let mut toast: Option<(ToastLevel, String)> = None;
+
         match message.result {
             Ok(result) => {
                 let lines: Vec<String> = if result.success {
@@ -759,10 +758,44 @@ impl App {
                 self.last_command_output = lines.into_iter().take(8).collect();
                 if result.success {
                     self.status = format!("{label} complete", label = message.label);
+                    if let Some(pkg) = package_action_target(
+                        &message.label,
+                        self.last_command_target.as_deref(),
+                    ) {
+                        toast = Some((
+                            ToastLevel::Success,
+                            format!("{} succeeded for {pkg}", action_title(&message.label)),
+                        ));
+                    } else if message.label == "upgrade-all" {
+                        toast = Some((
+                            ToastLevel::Success,
+                            "Upgrade succeeded for outdated packages".to_string(),
+                        ));
+                    }
                 } else {
                     self.status = format!("{label} failed", label = message.label);
                     if !result.stderr.trim().is_empty() {
                         self.last_command_error = Some(result.stderr.trim().to_string());
+                    }
+                    if let Some(pkg) = package_action_target(
+                        &message.label,
+                        self.last_command_target.as_deref(),
+                    ) {
+                        let reason = first_nonempty_line(&result.stderr)
+                            .or_else(|| first_nonempty_line(&result.stdout))
+                            .unwrap_or("Unknown error");
+                        toast = Some((
+                            ToastLevel::Error,
+                            format!("{} failed for {pkg}: {reason}", action_title(&message.label)),
+                        ));
+                    } else if message.label == "upgrade-all" {
+                        let reason = first_nonempty_line(&result.stderr)
+                            .or_else(|| first_nonempty_line(&result.stdout))
+                            .unwrap_or("Unknown error");
+                        toast = Some((
+                            ToastLevel::Error,
+                            format!("Upgrade failed for outdated packages: {reason}"),
+                        ));
                     }
                 }
 
@@ -798,13 +831,38 @@ impl App {
             Err(err) => {
                 self.last_command_error = Some(err.to_string());
                 self.status = format!("{label} failed", label = message.label);
+                if let Some(pkg) =
+                    package_action_target(&message.label, self.last_command_target.as_deref())
+                {
+                    toast = Some((
+                        ToastLevel::Error,
+                        format!("{} failed for {pkg}: {}", action_title(&message.label), err),
+                    ));
+                } else if message.label == "upgrade-all" {
+                    toast = Some((
+                        ToastLevel::Error,
+                        format!("Upgrade failed for outdated packages: {err}"),
+                    ));
+                }
             }
+        }
+
+        if let Some((level, message)) = toast {
+            self.show_toast(level, message);
         }
 
         self.pending_command = false;
         self.command_started_at = None;
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
+    }
+
+    fn show_toast(&mut self, level: ToastLevel, message: String) {
+        self.toast = Some(Toast {
+            level,
+            message,
+            created_at: Instant::now(),
+        });
     }
 }
 
@@ -828,4 +886,24 @@ fn detect_icon_ascii() -> bool {
         }
     }
     false
+}
+
+fn package_action_target<'a>(label: &str, target: Option<&'a str>) -> Option<&'a str> {
+    if matches!(label, "install" | "uninstall" | "upgrade") {
+        return target;
+    }
+    None
+}
+
+fn action_title(label: &str) -> &'static str {
+    match label {
+        "install" => "Install",
+        "uninstall" => "Uninstall",
+        "upgrade" => "Upgrade",
+        _ => "Action",
+    }
+}
+
+fn first_nonempty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
 }
