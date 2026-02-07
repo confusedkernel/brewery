@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-07
+
+### Added
+- Upgrade selected leaf with a two-step confirm flow (`Shift+U`)
+- Outdated tab in the status panel with installed outdated leaves
+- Upgrade-all flow for outdated packages from Status -> Outdated (`Shift+U`, confirm required)
+- Outdated-only filter for the leaves list (`o`)
+- Brew update recency indicators in Activity (`Brew update` + `Last brew update`)
+
+### Changed
+- Status panel now serves as the central Activity/Issues/Outdated workspace
+- Action outcomes are surfaced more clearly in Activity with success/error toast lines
+- Install/uninstall/upgrade and upgrade-all now refresh status data after completion
+- Command feedback in Activity includes clearer failure snippets for package actions
+
+### Refactored
+- Renamed health-oriented internals to status-oriented naming (`health` -> `status`)
+- Split app module into focused files (`state`, `filters`, `requests`, `reducers`)
+- Split status UI rendering into tab-specific builders for maintainability
+
 ## [0.2.0] - 2025-02-02
 
 ### Added

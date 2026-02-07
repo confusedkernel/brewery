@@ -22,9 +22,10 @@ _Browse, search, and manage your Homebrew packages with ease_
 - **📦 Package Browser** — Browse installed leaves with instant search filtering
 - **🔍 Advanced Search** — Search all available Homebrew packages
 - **📊 Rich Details** — View descriptions, homepage, versions, dependencies, and reverse dependencies
-- **🏥 Health Dashboard** — Run diagnostics, check outdated packages, and monitor activity
+- **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
 - **📏 Size Analytics** — Leaderboard of installed packages by disk usage
-- **⚡ Quick Actions** — Install, uninstall, cleanup, autoremove, and export Brewfiles
+- **⚡ Quick Actions** — Install, uninstall, upgrade, upgrade all outdated, cleanup, autoremove, and export Brewfiles
+- **🎯 Outdated Workflow** — Toggle outdated-only leaves filter and batch-upgrade outdated packages
 - **🎨 Adaptive Theming** — Auto-detects system theme with manual override (light/dark)
 - **🖥️ Pure Terminal** — No browser required, works entirely in your terminal
 
@@ -68,7 +69,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | ------- | ------------------------------------------ |
 | `i`     | Install package (press twice to confirm)   |
 | `u`     | Uninstall package (press twice to confirm) |
-| `Shift+U` | Upgrade package (press twice to confirm)   |
+| `Shift+U` | Upgrade selected leaf, or upgrade all outdated in Status -> Outdated (press twice to confirm) |
 | `Enter` | Load package details                       |
 | `d`     | Load dependencies and reverse dependencies |
 
@@ -78,7 +79,8 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | --- | ------------------------------ |
 | `r` | Refresh package list           |
 | `s` | Load package sizes             |
-| `h` | Run health check               |
+| `h` | Run status check               |
+| `o` | Toggle outdated-only leaves filter |
 | `c` | Cleanup old versions           |
 | `a` | Autoremove unused dependencies |
 | `b` | Export Brewfile (bundle dump)  |
