@@ -38,6 +38,7 @@ impl App {
             last_error: None,
             pending_package_action: None,
             pending_upgrade_all_outdated: false,
+            pending_self_update: false,
             pending_leaves: false,
             last_leaves_refresh: None,
             last_sizes_refresh: None,
@@ -221,11 +222,18 @@ impl App {
         if self.pending_command
             && matches!(
                 self.last_command.as_deref(),
-                Some("install") | Some("uninstall") | Some("upgrade") | Some("upgrade-all")
+                Some("install")
+                    | Some("uninstall")
+                    | Some("upgrade")
+                    | Some("upgrade-all")
+                    | Some("self-update")
             )
         {
             count += 1 + self.last_command_output.len();
-            if self.last_command_target.is_some() {
+            if self.last_command_target.is_some()
+                || self.last_command.as_deref() == Some("upgrade-all")
+                || self.last_command.as_deref() == Some("self-update")
+            {
                 count += 1;
             }
         }

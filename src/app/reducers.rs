@@ -134,6 +134,11 @@ impl App {
                             ToastLevel::Success,
                             "Upgrade succeeded for outdated packages".to_string(),
                         ));
+                    } else if message.label == "self-update" {
+                        toast = Some((
+                            ToastLevel::Success,
+                            "Brewery updated. Restart to use the new version".to_string(),
+                        ));
                     }
                 } else {
                     self.status = format!("{label} failed", label = message.label);
@@ -160,6 +165,14 @@ impl App {
                         toast = Some((
                             ToastLevel::Error,
                             format!("Upgrade failed for outdated packages: {reason}"),
+                        ));
+                    } else if message.label == "self-update" {
+                        let reason = first_nonempty_line(&result.stderr)
+                            .or_else(|| first_nonempty_line(&result.stdout))
+                            .unwrap_or("Unknown error");
+                        toast = Some((
+                            ToastLevel::Error,
+                            format!("Brewery update failed: {reason}"),
                         ));
                     }
                 }
@@ -208,6 +221,8 @@ impl App {
                         ToastLevel::Error,
                         format!("Upgrade failed for outdated packages: {err}"),
                     ));
+                } else if message.label == "self-update" {
+                    toast = Some((ToastLevel::Error, format!("Brewery update failed: {err}")));
                 }
             }
         }

@@ -135,7 +135,11 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
     if !(app.pending_command
         && matches!(
             app.last_command.as_deref(),
-            Some("install") | Some("uninstall") | Some("upgrade") | Some("upgrade-all")
+            Some("install")
+                | Some("uninstall")
+                | Some("upgrade")
+                | Some("upgrade-all")
+                | Some("self-update")
         ))
     {
         return None;
@@ -148,6 +152,7 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         Some("uninstall") => "Uninstalling",
         Some("upgrade") => "Upgrading",
         Some("upgrade-all") => "Upgrading outdated packages",
+        Some("self-update") => "Updating Brewery",
         _ => "Running",
     };
     let label = app
@@ -169,6 +174,11 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         ));
     } else if app.last_command.as_deref() == Some("upgrade-all") {
         items.push(("Command: brew upgrade".to_string(), theme.text_muted));
+    } else if app.last_command.as_deref() == Some("self-update") {
+        items.push((
+            "Command: cargo install brewery --locked --force".to_string(),
+            theme.text_muted,
+        ));
     }
     items.extend(
         app.last_command_output
@@ -207,6 +217,12 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
             .map(|value| format!(" {sep} {value}"))
             .unwrap_or_default();
         items.push((format!("Version: {ver}{info}"), theme.text_primary));
+    }
+
+    if system_status.brewery_update_available {
+        if let Some(latest) = system_status.brewery_latest_version.as_ref() {
+            items.push((format!("Brewery update: v{latest} available"), theme.orange));
+        }
     }
 
     let doctor_status = match system_status.doctor_ok {

@@ -14,7 +14,6 @@ pub fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         ("i", "install"),
         ("u", "uninstall"),
         ("U", "upgrade"),
-        ("o", "outdated filter"),
         ("f,/", "search"),
         ("?", "help"),
     ];

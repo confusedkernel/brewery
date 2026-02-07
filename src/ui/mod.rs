@@ -1,10 +1,10 @@
 mod details;
 mod footer;
-mod status;
 pub mod help;
 mod leaves;
 mod search;
 mod sizes;
+mod status;
 mod util;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -42,11 +42,32 @@ pub fn draw(frame: &mut ratatui::Frame, app: &App) {
 fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let theme = &app.theme;
     let uptime = app.started_at.elapsed().as_secs();
+    let current_version = env!("CARGO_PKG_VERSION");
 
     let theme_indicator = match app.theme_mode {
         ThemeMode::Auto => "auto",
         ThemeMode::Light => "light",
         ThemeMode::Dark => "dark",
+    };
+
+    let mut version_label = format!("v{current_version}");
+    if let Some(status) = app.system_status.as_ref() {
+        if status.brewery_update_available {
+            if let Some(latest) = status.brewery_latest_version.as_ref() {
+                version_label = format!("v{current_version} (update: v{latest})");
+            }
+        }
+    }
+
+    let version_color = if app
+        .system_status
+        .as_ref()
+        .map(|status| status.brewery_update_available)
+        .unwrap_or(false)
+    {
+        theme.orange
+    } else {
+        theme.text_muted
     };
 
     let line = Line::from(vec![
@@ -59,10 +80,7 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(" "),
-        Span::styled(
-            format!("v{}", env!("CARGO_PKG_VERSION")),
-            Style::default().fg(theme.text_muted),
-        ),
+        Span::styled(version_label, Style::default().fg(version_color)),
         Span::raw("  "),
         Span::styled(&app.status, Style::default().fg(theme.text_secondary)),
         Span::raw("  "),

@@ -1,4 +1,4 @@
-use crate::brew::run_brew_command;
+use crate::brew::{run_brew_command, run_command};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -13,6 +13,8 @@ pub struct StatusSnapshot {
     pub brew_info: Option<String>,
     pub brew_update_status: Option<String>,
     pub last_brew_update_secs_ago: Option<u64>,
+    pub brewery_latest_version: Option<String>,
+    pub brewery_update_available: bool,
 }
 
 pub struct StatusMessage {
@@ -30,6 +32,7 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         doctor_result,
         brew_repo_result,
         core_repo_result,
+        latest_brewery_result,
     ) = tokio::join!(
         run_brew_command(&["--version"]),
         run_brew_command(&["info"]),
@@ -37,6 +40,7 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         run_brew_command(&["doctor"]),
         run_brew_command(&["--repository"]),
         run_brew_command(&["--repository", "homebrew/core"]),
+        run_command("cargo", &["search", "brewery", "--limit", "1"]),
     );
 
     // Process version result
@@ -105,6 +109,15 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         None => "Unknown".to_string(),
     });
 
+    if let Ok(result) = latest_brewery_result {
+        if result.success {
+            if let Some(latest) = parse_latest_brewery_version(&result.stdout) {
+                status.brewery_update_available = is_newer_version(&latest, env!("CARGO_PKG_VERSION"));
+                status.brewery_latest_version = Some(latest);
+            }
+        }
+    }
+
     // Build leaf set from leaves result
     let leaf_set: HashSet<String> = match leaves_result {
         Ok(result) => result
@@ -149,4 +162,39 @@ fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
     }
 
     latest.and_then(|time| time.elapsed().ok().map(|elapsed| elapsed.as_secs()))
+}
+
+fn parse_latest_brewery_version(stdout: &str) -> Option<String> {
+    let line = stdout.lines().find(|line| line.trim_start().starts_with("brewery "))?;
+    let first_quote = line.find('"')?;
+    let rest = &line[first_quote + 1..];
+    let second_quote = rest.find('"')?;
+    let version = rest[..second_quote].trim();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version.to_string())
+    }
+}
+
+fn is_newer_version(latest: &str, current: &str) -> bool {
+    parse_semver_triplet(latest) > parse_semver_triplet(current)
+}
+
+fn parse_semver_triplet(version: &str) -> (u64, u64, u64) {
+    let core = version.split('-').next().unwrap_or(version);
+    let mut parts = core.split('.');
+    let major = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let minor = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let patch = parts
+        .next()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    (major, minor, patch)
 }

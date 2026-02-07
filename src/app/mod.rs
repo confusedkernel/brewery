@@ -17,7 +17,7 @@ use lru::LruCache;
 use crate::brew::{
     CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage, SizeEntry, SizesMessage,
     StatusMessage, StatusSnapshot, fetch_details_basic, fetch_details_full, fetch_leaves,
-    fetch_sizes, fetch_status, run_brew_command,
+    fetch_sizes, fetch_status, run_brew_command, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -60,6 +60,7 @@ pub struct App {
     pub last_error: Option<String>,
     pub pending_package_action: Option<PendingPackageAction>,
     pub pending_upgrade_all_outdated: bool,
+    pub pending_self_update: bool,
     pub pending_leaves: bool,
     pub last_leaves_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,

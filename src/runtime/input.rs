@@ -59,6 +59,9 @@ pub fn handle_key_event(
                 } else if app.pending_upgrade_all_outdated {
                     clear_pending_confirmations(app);
                     set_status(app, "Canceled");
+                } else if app.pending_self_update {
+                    clear_pending_confirmations(app);
+                    set_status(app, "Canceled");
                 } else if !app.leaves_query.is_empty() {
                     app.leaves_query.clear();
                     app.update_filtered_leaves();
@@ -144,6 +147,24 @@ pub fn handle_key_event(
                     &["bundle", "dump", "--force"],
                     &channels.command_tx,
                 );
+            }
+            KeyCode::Char('P') => {
+                if app.pending_self_update {
+                    app.request_command(
+                        "self-update",
+                        &["install", "brewery", "--locked", "--force"],
+                        &channels.command_tx,
+                    );
+                    clear_pending_confirmations(app);
+                    set_status(app, "Updating Brewery...");
+                } else {
+                    clear_pending_confirmations(app);
+                    app.pending_self_update = true;
+                    set_status(
+                        app,
+                        "Update Brewery via `cargo install brewery --locked --force`? [P] confirm, [Esc] cancel",
+                    );
+                }
             }
             KeyCode::Enter => {
                 app.request_details(DetailsLoad::Basic, &channels.details_tx);
@@ -254,8 +275,11 @@ pub fn handle_key_event(
         },
         InputMode::PackageResults => match key.code {
             KeyCode::Esc => {
-                if app.pending_package_action.is_some() {
-                    app.pending_package_action = None;
+                if app.pending_package_action.is_some()
+                    || app.pending_upgrade_all_outdated
+                    || app.pending_self_update
+                {
+                    clear_pending_confirmations(app);
                     app.status = "Canceled".to_string();
                     app.last_refresh = Instant::now();
                 } else {
@@ -271,18 +295,18 @@ pub fn handle_key_event(
                 app.input_mode = InputMode::PackageSearch;
                 app.package_query.clear();
                 app.clear_package_results();
-                app.pending_package_action = None;
+                clear_pending_confirmations(app);
                 app.status = "Search packages".to_string();
                 app.last_refresh = Instant::now();
             }
             KeyCode::Up | KeyCode::Char('k') => {
                 app.select_prev_result();
-                app.pending_package_action = None;
+                clear_pending_confirmations(app);
                 app.on_selection_change();
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 app.select_next_result();
-                app.pending_package_action = None;
+                clear_pending_confirmations(app);
                 app.on_selection_change();
             }
             KeyCode::Char('i') => {
@@ -372,6 +396,7 @@ fn package_action_labels(
 fn clear_pending_confirmations(app: &mut App) {
     app.pending_package_action = None;
     app.pending_upgrade_all_outdated = false;
+    app.pending_self_update = false;
 }
 
 fn set_status(app: &mut App, status: impl Into<String>) {

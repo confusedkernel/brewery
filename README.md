@@ -25,6 +25,7 @@ _Browse, search, and manage your Homebrew packages with ease_
 - **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
 - **📏 Size Analytics** — Leaderboard of installed packages by disk usage
 - **⚡ Quick Actions** — Install, uninstall, upgrade, upgrade all outdated, cleanup, autoremove, and export Brewfiles
+- **🔄 Self Update** — Detect new Brewery releases and update in-app via Cargo
 - **🎯 Outdated Workflow** — Toggle outdated-only leaves filter and batch-upgrade outdated packages
 - **🎨 Adaptive Theming** — Auto-detects system theme with manual override (light/dark)
 - **🖥️ Pure Terminal** — No browser required, works entirely in your terminal
@@ -80,6 +81,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | `r` | Refresh package list           |
 | `s` | Load package sizes             |
 | `h` | Run status check               |
+| `Shift+P` | Update Brewery via Cargo (press twice to confirm) |
 | `o` | Toggle outdated-only leaves filter |
 | `c` | Cleanup old versions           |
 | `a` | Autoremove unused dependencies |

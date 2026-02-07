@@ -11,7 +11,11 @@ pub struct CommandMessage {
 }
 
 pub async fn run_brew_command(args: &[&str]) -> anyhow::Result<CommandResult> {
-    let output = tokio::process::Command::new("brew")
+    run_command("brew", args).await
+}
+
+pub async fn run_command(binary: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
+    let output = tokio::process::Command::new(binary)
         .args(args)
         .output()
         .await?;

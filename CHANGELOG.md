@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-02-08
+
+### Added
+- In-app Brewery self-update action via `Shift+P` with two-step confirmation
+- Activity panel support for self-update progress and command output
+
+### Changed
+- Header version now shows update availability next to current version
+- README updated with self-update feature and shortcut documentation
+
 ## [0.3.0] - 2026-02-07
 
 ### Added
