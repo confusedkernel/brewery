@@ -2,7 +2,9 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, ViewMode};
+use crate::app::{
+    App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, StatusTab, ViewMode,
+};
 use crate::brew::DetailsLoad;
 use crate::runtime::messages::{handle_focus_backtab, RuntimeChannels};
 
@@ -52,25 +54,21 @@ pub fn handle_key_event(
             KeyCode::Char('q') => return Some(Ok(())),
             KeyCode::Esc => {
                 if app.pending_package_action.is_some() {
-                    app.pending_package_action = None;
-                    app.pending_upgrade_all_outdated = false;
-                    app.status = "Canceled".to_string();
-                    app.last_refresh = Instant::now();
+                    clear_pending_confirmations(app);
+                    set_status(app, "Canceled");
                 } else if app.pending_upgrade_all_outdated {
-                    app.pending_upgrade_all_outdated = false;
-                    app.status = "Canceled".to_string();
-                    app.last_refresh = Instant::now();
+                    clear_pending_confirmations(app);
+                    set_status(app, "Canceled");
                 } else if !app.leaves_query.is_empty() {
                     app.leaves_query.clear();
                     app.update_filtered_leaves();
-                    app.status = "Filters cleared".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "Filters cleared");
                 }
             }
             KeyCode::Char('r') => app.request_leaves(&channels.leaves_tx),
             KeyCode::Char('t') => app.cycle_theme(),
             KeyCode::Char('s') => app.request_sizes(&channels.sizes_tx),
-            KeyCode::Char('h') => app.request_health(&channels.health_tx),
+            KeyCode::Char('h') => app.request_status(&channels.status_tx),
             KeyCode::Char('v') => {
                 app.view_mode = match app.view_mode {
                     ViewMode::Details => ViewMode::PackageResults,
@@ -85,11 +83,10 @@ pub fn handle_key_event(
                 app.last_refresh = std::time::Instant::now();
             }
             KeyCode::Char('o') => {
-                app.pending_package_action = None;
-                app.pending_upgrade_all_outdated = false;
+                clear_pending_confirmations(app);
                 app.toggle_outdated_filter();
-                if app.leaves_outdated_only && app.health.is_none() && !app.pending_health {
-                    app.request_health(&channels.health_tx);
+                if app.leaves_outdated_only && app.system_status.is_none() && !app.pending_status {
+                    app.request_status(&channels.status_tx);
                 }
             }
             KeyCode::Char('f') => {
@@ -102,120 +99,37 @@ pub fn handle_key_event(
             KeyCode::Char('i') => {
                 if app.focus_panel == FocusedPanel::Leaves {
                     let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                        app.status = "No leaf selected".to_string();
-                        app.last_refresh = Instant::now();
+                        set_status(app, "No leaf selected");
                         return None;
                     };
-
-                    let action = PackageAction::Install;
-                    if matches!(app.pending_package_action.as_ref(),
-                        Some(pending) if pending.action == action && pending.pkg == pkg)
-                    {
-                        app.request_command("install", &["install", &pkg], &channels.command_tx);
-                        app.pending_package_action = None;
-                        app.status = "Installing...".to_string();
-                        app.last_refresh = Instant::now();
-                    } else {
-                        app.pending_package_action = Some(PendingPackageAction {
-                            action,
-                            pkg: pkg.clone(),
-                        });
-                        app.status = format!("Install {pkg}? [i] confirm, [Esc] cancel");
-                        app.last_refresh = Instant::now();
-                    }
+                    run_or_confirm_package_action(app, channels, PackageAction::Install, pkg);
                 } else {
-                    app.status = "Focus leaves to install".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "Focus leaves to install");
                 }
             }
             KeyCode::Char('u') => {
                 if app.focus_panel == FocusedPanel::Leaves {
                     let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                        app.status = "No leaf selected".to_string();
-                        app.last_refresh = Instant::now();
+                        set_status(app, "No leaf selected");
                         return None;
                     };
-
-                    let action = PackageAction::Uninstall;
-                    if matches!(app.pending_package_action.as_ref(),
-                        Some(pending) if pending.action == action && pending.pkg == pkg)
-                    {
-                        app.request_command(
-                            "uninstall",
-                            &["uninstall", &pkg],
-                            &channels.command_tx,
-                        );
-                        app.pending_package_action = None;
-                        app.status = "Uninstalling...".to_string();
-                        app.last_refresh = Instant::now();
-                    } else {
-                        app.pending_package_action = Some(PendingPackageAction {
-                            action,
-                            pkg: pkg.clone(),
-                        });
-                        app.status = format!("Uninstall {pkg}? [u] confirm, [Esc] cancel");
-                        app.last_refresh = Instant::now();
-                    }
+                    run_or_confirm_package_action(app, channels, PackageAction::Uninstall, pkg);
                 } else {
-                    app.status = "Focus leaves to uninstall".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "Focus leaves to uninstall");
                 }
             }
             KeyCode::Char('U') => {
-                if app.focus_panel == FocusedPanel::Status
-                    && app.health_tab == crate::app::HealthTab::Outdated
+                if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Outdated
                 {
-                    let outdated = app
-                        .health
-                        .as_ref()
-                        .map(|h| h.outdated_packages.len())
-                        .unwrap_or(0);
-                    if outdated == 0 {
-                        app.status = "No outdated packages".to_string();
-                        app.last_refresh = Instant::now();
-                        return None;
-                    }
-
-                    if app.pending_upgrade_all_outdated {
-                        app.request_command("upgrade-all", &["upgrade"], &channels.command_tx);
-                        app.pending_upgrade_all_outdated = false;
-                        app.pending_package_action = None;
-                        app.status = format!("Upgrading {outdated} outdated packages...");
-                        app.last_refresh = Instant::now();
-                    } else {
-                        app.pending_upgrade_all_outdated = true;
-                        app.pending_package_action = None;
-                        app.status = format!(
-                            "Upgrade all {outdated} outdated packages? [U] confirm, [Esc] cancel"
-                        );
-                        app.last_refresh = Instant::now();
-                    }
+                    run_or_confirm_upgrade_all_outdated(app, channels);
                 } else if app.focus_panel == FocusedPanel::Leaves {
                     let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                        app.status = "No leaf selected".to_string();
-                        app.last_refresh = Instant::now();
+                        set_status(app, "No leaf selected");
                         return None;
                     };
-
-                    let action = PackageAction::Upgrade;
-                    if matches!(app.pending_package_action.as_ref(),
-                        Some(pending) if pending.action == action && pending.pkg == pkg)
-                    {
-                        app.request_command("upgrade", &["upgrade", &pkg], &channels.command_tx);
-                        app.pending_package_action = None;
-                        app.status = "Upgrading...".to_string();
-                        app.last_refresh = Instant::now();
-                    } else {
-                        app.pending_package_action = Some(PendingPackageAction {
-                            action,
-                            pkg: pkg.clone(),
-                        });
-                        app.status = format!("Upgrade {pkg}? [U] confirm, [Esc] cancel");
-                        app.last_refresh = Instant::now();
-                    }
+                    run_or_confirm_package_action(app, channels, PackageAction::Upgrade, pkg);
                 } else {
-                    app.status = "Focus leaves to upgrade".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "Focus leaves to upgrade");
                 }
             }
             KeyCode::Char('c') => {
@@ -244,24 +158,22 @@ pub fn handle_key_event(
             KeyCode::Up | KeyCode::Char('k') => {
                 app.scroll_focused_up();
                 if app.focus_panel == FocusedPanel::Leaves {
-                    app.pending_package_action = None;
-                    app.pending_upgrade_all_outdated = false;
+                    clear_pending_confirmations(app);
                     app.on_selection_change();
                 }
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 app.scroll_focused_down();
                 if app.focus_panel == FocusedPanel::Leaves {
-                    app.pending_package_action = None;
-                    app.pending_upgrade_all_outdated = false;
+                    clear_pending_confirmations(app);
                     app.on_selection_change();
                 }
             }
             KeyCode::Left | KeyCode::Char('l') if app.focus_panel == FocusedPanel::Status => {
-                app.health_tab_prev();
+                app.status_tab_prev();
             }
             KeyCode::Right | KeyCode::Char(';') if app.focus_panel == FocusedPanel::Status => {
-                app.health_tab_next();
+                app.status_tab_next();
             }
             _ => {}
         },
@@ -375,55 +287,94 @@ pub fn handle_key_event(
             }
             KeyCode::Char('i') => {
                 let Some(pkg) = app.selected_package_result().map(str::to_string) else {
-                    app.status = "No result selected".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "No result selected");
                     return None;
                 };
-
-                let action = PackageAction::Install;
-                if matches!(app.pending_package_action.as_ref(),
-                    Some(pending) if pending.action == action && pending.pkg == pkg)
-                {
-                    app.request_command("install", &["install", &pkg], &channels.command_tx);
-                    app.pending_package_action = None;
-                    app.status = "Installing...".to_string();
-                    app.last_refresh = Instant::now();
-                } else {
-                    app.pending_package_action = Some(PendingPackageAction {
-                        action,
-                        pkg: pkg.clone(),
-                    });
-                    app.status = format!("Install {pkg}? [i] confirm, [Esc] cancel");
-                    app.last_refresh = Instant::now();
-                }
+                run_or_confirm_package_action(app, channels, PackageAction::Install, pkg);
             }
             KeyCode::Char('u') => {
                 let Some(pkg) = app.selected_package_result().map(str::to_string) else {
-                    app.status = "No result selected".to_string();
-                    app.last_refresh = Instant::now();
+                    set_status(app, "No result selected");
                     return None;
                 };
-
-                let action = PackageAction::Uninstall;
-                if matches!(app.pending_package_action.as_ref(),
-                    Some(pending) if pending.action == action && pending.pkg == pkg)
-                {
-                    app.request_command("uninstall", &["uninstall", &pkg], &channels.command_tx);
-                    app.pending_package_action = None;
-                    app.status = "Uninstalling...".to_string();
-                    app.last_refresh = Instant::now();
-                } else {
-                    app.pending_package_action = Some(PendingPackageAction {
-                        action,
-                        pkg: pkg.clone(),
-                    });
-                    app.status = format!("Uninstall {pkg}? [u] confirm, [Esc] cancel");
-                    app.last_refresh = Instant::now();
-                }
+                run_or_confirm_package_action(app, channels, PackageAction::Uninstall, pkg);
             }
             _ => {}
         },
     }
 
     None
+}
+
+fn run_or_confirm_package_action(
+    app: &mut App,
+    channels: &RuntimeChannels,
+    action: PackageAction,
+    pkg: String,
+) {
+    let (label, verb_ing, verb_title, confirm_key) = package_action_labels(action);
+
+    if matches!(app.pending_package_action.as_ref(), Some(pending) if pending.action == action && pending.pkg == pkg)
+    {
+        app.request_command(label, &[label, &pkg], &channels.command_tx);
+        clear_pending_confirmations(app);
+        set_status(app, format!("{verb_ing}..."));
+        return;
+    }
+
+    app.pending_upgrade_all_outdated = false;
+    app.pending_package_action = Some(PendingPackageAction {
+        action,
+        pkg: pkg.clone(),
+    });
+    set_status(
+        app,
+        format!("{verb_title} {pkg}? [{confirm_key}] confirm, [Esc] cancel"),
+    );
+}
+
+fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels) {
+    let outdated = app
+        .system_status
+        .as_ref()
+        .map(|status| status.outdated_packages.len())
+        .unwrap_or(0);
+    if outdated == 0 {
+        set_status(app, "No outdated packages");
+        return;
+    }
+
+    if app.pending_upgrade_all_outdated {
+        app.request_command("upgrade-all", &["upgrade"], &channels.command_tx);
+        clear_pending_confirmations(app);
+        set_status(app, format!("Upgrading {outdated} outdated packages..."));
+        return;
+    }
+
+    app.pending_package_action = None;
+    app.pending_upgrade_all_outdated = true;
+    set_status(
+        app,
+        format!("Upgrade all {outdated} outdated packages? [U] confirm, [Esc] cancel"),
+    );
+}
+
+fn package_action_labels(
+    action: PackageAction,
+) -> (&'static str, &'static str, &'static str, char) {
+    match action {
+        PackageAction::Install => ("install", "Installing", "Install", 'i'),
+        PackageAction::Uninstall => ("uninstall", "Uninstalling", "Uninstall", 'u'),
+        PackageAction::Upgrade => ("upgrade", "Upgrading", "Upgrade", 'U'),
+    }
+}
+
+fn clear_pending_confirmations(app: &mut App) {
+    app.pending_package_action = None;
+    app.pending_upgrade_all_outdated = false;
+}
+
+fn set_status(app: &mut App, status: impl Into<String>) {
+    app.status = status.into();
+    app.last_refresh = Instant::now();
 }

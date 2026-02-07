@@ -10,12 +10,12 @@ pub struct RuntimeChannels {
     pub details_tx: mpsc::UnboundedSender<crate::brew::DetailsMessage>,
     pub sizes_tx: mpsc::UnboundedSender<crate::brew::SizesMessage>,
     pub command_tx: mpsc::UnboundedSender<crate::brew::CommandMessage>,
-    pub health_tx: mpsc::UnboundedSender<crate::brew::HealthMessage>,
+    pub status_tx: mpsc::UnboundedSender<crate::brew::StatusMessage>,
     pub leaves_rx: mpsc::UnboundedReceiver<LeavesMessage>,
     pub details_rx: mpsc::UnboundedReceiver<crate::brew::DetailsMessage>,
     pub sizes_rx: mpsc::UnboundedReceiver<crate::brew::SizesMessage>,
     pub command_rx: mpsc::UnboundedReceiver<crate::brew::CommandMessage>,
-    pub health_rx: mpsc::UnboundedReceiver<crate::brew::HealthMessage>,
+    pub status_rx: mpsc::UnboundedReceiver<crate::brew::StatusMessage>,
 }
 
 pub fn create_channels() -> RuntimeChannels {
@@ -23,19 +23,19 @@ pub fn create_channels() -> RuntimeChannels {
     let (details_tx, details_rx) = mpsc::unbounded_channel();
     let (sizes_tx, sizes_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
-    let (health_tx, health_rx) = mpsc::unbounded_channel();
+    let (status_tx, status_rx) = mpsc::unbounded_channel();
 
     RuntimeChannels {
         leaves_tx,
         details_tx,
         sizes_tx,
         command_tx,
-        health_tx,
+        status_tx,
         leaves_rx,
         details_rx,
         sizes_rx,
         command_rx,
-        health_rx,
+        status_rx,
     }
 }
 
@@ -56,7 +56,7 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
     }
     while let Ok(message) = channels.command_rx.try_recv() {
         let mut should_refresh_leaves = false;
-        let mut should_refresh_health = false;
+        let mut should_refresh_status = false;
         let mut refresh_details_pkg = None;
         match &message.result {
             Ok(result) => {
@@ -65,7 +65,7 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
                         message.label.as_str(),
                         "install" | "uninstall" | "upgrade" | "upgrade-all"
                     );
-                    should_refresh_health = matches!(
+                    should_refresh_status = matches!(
                         message.label.as_str(),
                         "install" | "uninstall" | "upgrade" | "upgrade-all"
                     );
@@ -80,16 +80,16 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         if should_refresh_leaves {
             app.request_leaves(&channels.leaves_tx);
         }
-        if should_refresh_health {
-            app.request_health(&channels.health_tx);
+        if should_refresh_status {
+            app.request_status(&channels.status_tx);
         }
         if let Some(pkg) = refresh_details_pkg {
             app.request_details_forced(&pkg, DetailsLoad::Basic, &channels.details_tx);
         }
         received_message = true;
     }
-    while let Ok(message) = channels.health_rx.try_recv() {
-        app.apply_health_message(message);
+    while let Ok(message) = channels.status_rx.try_recv() {
+        app.apply_status_message(message);
         received_message = true;
     }
 

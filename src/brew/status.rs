@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 
 #[derive(Clone, Debug, Default)]
-pub struct HealthStatus {
+pub struct StatusSnapshot {
     pub doctor_ok: Option<bool>,
     pub doctor_issues: Vec<String>,
     pub outdated_count: Option<usize>,
@@ -15,12 +15,12 @@ pub struct HealthStatus {
     pub last_brew_update_secs_ago: Option<u64>,
 }
 
-pub struct HealthMessage {
-    pub result: anyhow::Result<HealthStatus>,
+pub struct StatusMessage {
+    pub result: anyhow::Result<StatusSnapshot>,
 }
 
-pub async fn fetch_health() -> anyhow::Result<HealthStatus> {
-    let mut status = HealthStatus::default();
+pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
+    let mut status = StatusSnapshot::default();
 
     // Run independent commands in parallel (version, info, leaves, doctor, repo paths)
     let (

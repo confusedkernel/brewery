@@ -42,7 +42,7 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         let title = format!(" Leaves ({}){}", leaves.len(), filter_suffix);
         let items = if leaves.is_empty() {
             let empty_label = if app.leaves_outdated_only {
-                if app.health.is_some() {
+                if app.system_status.is_some() {
                     "  No outdated leaves"
                 } else {
                     "  No outdated data yet (press h)"

@@ -1,6 +1,6 @@
 mod details;
 mod footer;
-mod health;
+mod status;
 pub mod help;
 mod leaves;
 mod search;
@@ -109,7 +109,7 @@ fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         app,
         app.focus_panel == FocusedPanel::Sizes,
     );
-    health::draw_health_panel(
+    status::draw_status_panel(
         frame,
         right_panels[0],
         app,

@@ -15,7 +15,7 @@ pub enum IconMode {
     Ascii,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum PackageAction {
     Install,
     Uninstall,
@@ -43,7 +43,7 @@ pub enum FocusedPanel {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum HealthTab {
+pub enum StatusTab {
     #[default]
     Activity,
     Issues,
