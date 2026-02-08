@@ -11,8 +11,11 @@ use crate::runtime::input::handle_key_event;
 use crate::runtime::messages::{create_channels, handle_auto_details, process_pending_messages};
 use crate::ui::{draw, help};
 
-/// Tick rate for the main event loop
-const TICK_RATE: Duration = Duration::from_millis(250);
+/// Poll interval while spinner/progress is active.
+const ACTIVE_TICK_RATE: Duration = Duration::from_millis(80);
+
+/// Maximum poll interval while app is idle.
+const IDLE_TICK_RATE: Duration = Duration::from_secs(1);
 
 /// Debounce delay for auto-fetching details when selection changes.
 /// This prevents rapid-fire requests when scrolling quickly through lists.
@@ -55,7 +58,13 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
             DETAILS_DEBOUNCE,
         );
 
-        if event::poll(TICK_RATE)? {
+        let tick_rate = if app.pending_command {
+            ACTIVE_TICK_RATE
+        } else {
+            IDLE_TICK_RATE
+        };
+
+        if event::poll(tick_rate)? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     let max_offset = help_max_offset(&app);
