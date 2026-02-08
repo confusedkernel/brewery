@@ -1,7 +1,18 @@
 use crate::brew::{run_brew_command, run_command};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
+
+const LATEST_BREWERY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+#[derive(Clone)]
+struct LatestBreweryCacheEntry {
+    version: Option<String>,
+    checked_at: SystemTime,
+}
+
+static LATEST_BREWERY_CACHE: OnceLock<Mutex<Option<LatestBreweryCacheEntry>>> = OnceLock::new();
 
 #[derive(Clone, Debug, Default)]
 pub struct StatusSnapshot {
@@ -32,7 +43,7 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         doctor_result,
         brew_repo_result,
         core_repo_result,
-        latest_brewery_result,
+        latest_brewery_version,
     ) = tokio::join!(
         run_brew_command(&["--version"]),
         run_brew_command(&["info"]),
@@ -40,7 +51,7 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         run_brew_command(&["doctor"]),
         run_brew_command(&["--repository"]),
         run_brew_command(&["--repository", "homebrew/core"]),
-        run_command("cargo", &["search", "brewery", "--limit", "1"]),
+        fetch_latest_brewery_version_cached(),
     );
 
     // Process version result
@@ -109,13 +120,9 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         None => "Unknown".to_string(),
     });
 
-    if let Ok(result) = latest_brewery_result {
-        if result.success {
-            if let Some(latest) = parse_latest_brewery_version(&result.stdout) {
-                status.brewery_update_available = is_newer_version(&latest, env!("CARGO_PKG_VERSION"));
-                status.brewery_latest_version = Some(latest);
-            }
-        }
+    if let Some(latest) = latest_brewery_version {
+        status.brewery_update_available = is_newer_version(&latest, env!("CARGO_PKG_VERSION"));
+        status.brewery_latest_version = Some(latest);
     }
 
     // Build leaf set from leaves result
@@ -156,7 +163,11 @@ fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
         let fetch_head = PathBuf::from(repo).join(".git").join("FETCH_HEAD");
         if let Ok(metadata) = std::fs::metadata(fetch_head) {
             if let Ok(modified) = metadata.modified() {
-                latest = Some(latest.map(|current| current.max(modified)).unwrap_or(modified));
+                latest = Some(
+                    latest
+                        .map(|current| current.max(modified))
+                        .unwrap_or(modified),
+                );
             }
         }
     }
@@ -165,7 +176,9 @@ fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
 }
 
 fn parse_latest_brewery_version(stdout: &str) -> Option<String> {
-    let line = stdout.lines().find(|line| line.trim_start().starts_with("brewery "))?;
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("brewery "))?;
     let first_quote = line.find('"')?;
     let rest = &line[first_quote + 1..];
     let second_quote = rest.find('"')?;
@@ -197,4 +210,40 @@ fn parse_semver_triplet(version: &str) -> (u64, u64, u64) {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
     (major, minor, patch)
+}
+
+async fn fetch_latest_brewery_version_cached() -> Option<String> {
+    if let Some(version) = read_cached_latest_brewery_version() {
+        return version;
+    }
+
+    let fetched_version = match run_command("cargo", &["search", "brewery", "--limit", "1"]).await {
+        Ok(result) if result.success => parse_latest_brewery_version(&result.stdout),
+        _ => None,
+    };
+
+    write_cached_latest_brewery_version(fetched_version.clone());
+    fetched_version
+}
+
+fn read_cached_latest_brewery_version() -> Option<Option<String>> {
+    let cache = LATEST_BREWERY_CACHE.get_or_init(|| Mutex::new(None));
+    let guard = cache.lock().ok()?;
+    let entry = guard.as_ref()?;
+    let age = entry.checked_at.elapsed().ok()?;
+    if age <= LATEST_BREWERY_CACHE_TTL {
+        Some(entry.version.clone())
+    } else {
+        None
+    }
+}
+
+fn write_cached_latest_brewery_version(version: Option<String>) {
+    let cache = LATEST_BREWERY_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some(LatestBreweryCacheEntry {
+            version,
+            checked_at: SystemTime::now(),
+        });
+    }
 }

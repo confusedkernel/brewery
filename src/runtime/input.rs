@@ -6,7 +6,7 @@ use crate::app::{
     App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, StatusTab, ViewMode,
 };
 use crate::brew::DetailsLoad;
-use crate::runtime::messages::{handle_focus_backtab, RuntimeChannels};
+use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
 
 pub fn handle_key_event(
     app: &mut App,

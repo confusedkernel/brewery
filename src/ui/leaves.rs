@@ -33,7 +33,7 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         };
         (title, items, app.package_results_selected)
     } else {
-        let leaves = app.filtered_leaves();
+        let leaves = &app.filtered_leaves;
         let filter_suffix = if app.leaves_outdated_only {
             format!(" {} outdated", symbol(app, "·", "|"))
         } else {
@@ -57,8 +57,9 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         } else {
             leaves
                 .iter()
-                .map(|(_, item)| {
-                    let marker = if app.is_outdated_leaf(item) {
+                .filter_map(|idx| app.leaves.get(*idx))
+                .map(|item| {
+                    let marker = if app.is_outdated_leaf(item.as_str()) {
                         format!("{} ", symbol(app, "↑", "^"))
                     } else {
                         String::new()
@@ -72,7 +73,7 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         };
         let selected = app
             .selected_index
-            .and_then(|selected| leaves.iter().position(|(idx, _)| *idx == selected));
+            .and_then(|selected| leaves.iter().position(|idx| *idx == selected));
         (title, items, selected)
     };
 

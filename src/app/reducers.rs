@@ -84,6 +84,7 @@ impl App {
     pub fn apply_status_message(&mut self, message: StatusMessage) {
         match message.result {
             Ok(status_snapshot) => {
+                self.outdated_leaves = status_snapshot.outdated_packages.iter().cloned().collect();
                 self.system_status = Some(status_snapshot);
                 self.update_filtered_leaves();
                 let max_scroll = self.max_status_scroll();

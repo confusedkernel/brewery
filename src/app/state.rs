@@ -15,6 +15,7 @@ impl App {
             package_query: String::new(),
             leaves: Vec::new(),
             filtered_leaves: Vec::new(),
+            outdated_leaves: std::collections::HashSet::new(),
             filtered_leaves_dirty: true,
             package_results_selected: None,
             last_package_search: None,

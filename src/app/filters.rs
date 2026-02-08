@@ -1,18 +1,8 @@
 use super::*;
 
 impl App {
-    pub fn filtered_leaves(&self) -> Vec<(usize, &str)> {
-        self.filtered_leaves
-            .iter()
-            .filter_map(|idx| self.leaves.get(*idx).map(|item| (*idx, item.as_str())))
-            .collect()
-    }
-
     pub fn is_outdated_leaf(&self, pkg: &str) -> bool {
-        self.system_status
-            .as_ref()
-            .map(|status| status.outdated_packages.iter().any(|name| name == pkg))
-            .unwrap_or(false)
+        self.outdated_leaves.contains(pkg)
     }
 
     pub fn toggle_outdated_filter(&mut self) {
@@ -78,14 +68,18 @@ impl App {
     pub fn update_filtered_leaves(&mut self) {
         self.filtered_leaves_dirty = false;
 
-        let needle = self.leaves_query.to_lowercase();
+        let query = self.leaves_query.trim();
+        let has_query = !query.is_empty();
+        let query_is_ascii = query.is_ascii();
+        let query_lower = (!query_is_ascii && has_query).then(|| query.to_lowercase());
         self.filtered_leaves = self
             .leaves
             .iter()
             .enumerate()
             .filter(|(_, item)| !self.leaves_outdated_only || self.is_outdated_leaf(item))
             .filter(|(_, item)| {
-                self.leaves_query.is_empty() || item.to_lowercase().contains(&needle)
+                !has_query
+                    || leaf_matches_query(item, query, query_lower.as_deref(), query_is_ascii)
             })
             .map(|(idx, _)| idx)
             .collect();
@@ -139,4 +133,33 @@ impl App {
         };
         self.selected_index = self.filtered_leaves.get(prev_pos).copied();
     }
+}
+
+fn leaf_matches_query(
+    item: &str,
+    query: &str,
+    query_lower: Option<&str>,
+    query_is_ascii: bool,
+) -> bool {
+    if query_is_ascii && item.is_ascii() {
+        return contains_ascii_case_insensitive(item.as_bytes(), query.as_bytes());
+    }
+
+    let Some(query_lower) = query_lower else {
+        return true;
+    };
+    item.to_lowercase().contains(query_lower)
+}
+
+fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if needle.len() > haystack.len() {
+        return false;
+    }
+
+    haystack
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }

@@ -9,6 +9,7 @@ pub use types::{
     ToastLevel, ViewMode,
 };
 
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
@@ -37,6 +38,7 @@ pub struct App {
     pub package_query: String,
     pub leaves: Vec<String>,
     pub filtered_leaves: Vec<usize>,
+    pub outdated_leaves: HashSet<String>,
     pub filtered_leaves_dirty: bool,
     pub package_results_selected: Option<usize>,
     pub last_package_search: Option<String>,
