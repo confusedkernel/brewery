@@ -60,8 +60,9 @@ impl App {
     }
 
     pub fn on_tick(&mut self) {
-        // Always request redraw on tick for spinner animation and elapsed time updates
-        self.needs_redraw = true;
+        if self.pending_command {
+            self.needs_redraw = true;
+        }
 
         // Decay the rapid scroll counter over time
         // This allows the counter to reset if the user pauses
@@ -75,7 +76,10 @@ impl App {
 
         if self.last_refresh.elapsed() >= Duration::from_secs(5) {
             self.last_refresh = Instant::now();
-            self.status = "Idle".to_string();
+            if self.status != "Idle" {
+                self.status = "Idle".to_string();
+                self.needs_redraw = true;
+            }
         }
 
         if self
@@ -85,6 +89,7 @@ impl App {
             .unwrap_or(false)
         {
             self.toast = None;
+            self.needs_redraw = true;
         }
     }
 

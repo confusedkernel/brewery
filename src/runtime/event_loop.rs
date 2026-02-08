@@ -22,6 +22,7 @@ const DETAILS_DEBOUNCE: Duration = Duration::from_millis(300);
 pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
     let mut app = App::new();
     let mut channels = create_channels();
+    let mut last_uptime_second = app.started_at.elapsed().as_secs();
 
     let mut last_fetched_leaf: Option<String> = None;
 
@@ -31,6 +32,12 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
     app.request_sizes(&channels.sizes_tx);
 
     loop {
+        let current_uptime_second = app.started_at.elapsed().as_secs();
+        if current_uptime_second != last_uptime_second {
+            app.needs_redraw = true;
+            last_uptime_second = current_uptime_second;
+        }
+
         // Only redraw when needed
         if app.needs_redraw {
             terminal.draw(|frame| draw(frame, &app))?;
