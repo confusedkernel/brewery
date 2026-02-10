@@ -4,7 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, StatusTab, ToastLevel};
-use crate::brew::StatusSnapshot;
+use crate::brew::{CommandKind, StatusSnapshot};
 use crate::ui::util::symbol;
 
 type StatusLine = (String, Color);
@@ -133,26 +133,22 @@ fn build_activity_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
 
 fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
     if !(app.pending_command
-        && matches!(
-            app.last_command.as_deref(),
-            Some("install")
-                | Some("uninstall")
-                | Some("upgrade")
-                | Some("upgrade-all")
-                | Some("self-update")
-        ))
+        && app
+            .last_command
+            .map(CommandKind::is_activity_command)
+            .unwrap_or(false))
     {
         return None;
     }
 
     let theme = &app.theme;
     let spinner = spinner_frame(app);
-    let action = match app.last_command.as_deref() {
-        Some("install") => "Installing",
-        Some("uninstall") => "Uninstalling",
-        Some("upgrade") => "Upgrading",
-        Some("upgrade-all") => "Upgrading outdated packages",
-        Some("self-update") => "Updating Brewery",
+    let action = match app.last_command {
+        Some(CommandKind::Install) => "Installing",
+        Some(CommandKind::Uninstall) => "Uninstalling",
+        Some(CommandKind::Upgrade) => "Upgrading",
+        Some(CommandKind::UpgradeAll) => "Upgrading outdated packages",
+        Some(CommandKind::SelfUpdate) => "Updating Brewery",
         _ => "Running",
     };
     let label = app
@@ -167,14 +163,17 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
 
     let mut items = vec![(format!("{label} ({elapsed})"), theme.accent)];
     if let Some(target) = app.last_command_target.as_ref() {
-        let command = app.last_command.as_deref().unwrap_or("command");
+        let command = app
+            .last_command
+            .map(|kind| kind.label())
+            .unwrap_or("command");
         items.push((
             format!("Command: brew {command} {target}"),
             theme.text_muted,
         ));
-    } else if app.last_command.as_deref() == Some("upgrade-all") {
+    } else if app.last_command == Some(CommandKind::UpgradeAll) {
         items.push(("Command: brew upgrade".to_string(), theme.text_muted));
-    } else if app.last_command.as_deref() == Some("self-update") {
+    } else if app.last_command == Some(CommandKind::SelfUpdate) {
         items.push((
             "Command: cargo install brewery --locked --force".to_string(),
             theme.text_muted,
@@ -190,16 +189,16 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
 
 fn build_recent_completion_items(app: &App) -> Option<Vec<StatusLine>> {
     let theme = &app.theme;
-    let (label, pkg, completed_at) = app.last_command_completed.as_ref()?;
+    let (kind, pkg, completed_at) = app.last_command_completed.as_ref()?;
     if completed_at.elapsed().as_secs() >= 3 {
         return None;
     }
 
-    let verb = match label.as_str() {
-        "install" => "Install",
-        "uninstall" => "Uninstall",
-        "upgrade" => "Upgrade",
-        "upgrade-all" => "Upgrade all outdated",
+    let verb = match kind {
+        CommandKind::Install => "Install",
+        CommandKind::Uninstall => "Uninstall",
+        CommandKind::Upgrade => "Upgrade",
+        CommandKind::UpgradeAll => "Upgrade all outdated",
         _ => "Command",
     };
     Some(vec![(format!("{verb} completed: {pkg}"), theme.green)])
@@ -311,7 +310,10 @@ fn prepend_toast_item(app: &App, items: &mut Vec<StatusLine>) {
 fn append_last_command_error(app: &App, items: &mut Vec<StatusLine>) {
     let theme = &app.theme;
     if let Some(error) = app.last_command_error.as_ref() {
-        let label = app.last_command.as_deref().unwrap_or("command");
+        let label = app
+            .last_command
+            .map(|kind| kind.label())
+            .unwrap_or("command");
         items.push((format!("Last cmd failed: {label}"), theme.red));
         for line in error.lines().take(6) {
             items.push((format!("> {line}"), theme.red));

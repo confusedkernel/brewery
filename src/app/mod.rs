@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 
 use crate::brew::{
-    CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage, SizeEntry, SizesMessage,
-    StatusMessage, StatusSnapshot, fetch_details_basic, fetch_details_full, fetch_leaves,
-    fetch_sizes, fetch_status, run_brew_command, run_command,
+    CommandKind, CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage, SizeEntry,
+    SizesMessage, StatusMessage, StatusSnapshot, fetch_details_basic, fetch_details_full,
+    fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -53,10 +53,10 @@ pub struct App {
     pub icon_mode: IconMode,
     pub icons_ascii: bool,
     pub pending_command: bool,
-    pub last_command: Option<String>,
+    pub last_command: Option<CommandKind>,
     pub last_command_target: Option<String>,
     pub command_started_at: Option<Instant>,
-    pub last_command_completed: Option<(String, String, Instant)>,
+    pub last_command_completed: Option<(CommandKind, String, Instant)>,
     pub last_command_output: Vec<String>,
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,

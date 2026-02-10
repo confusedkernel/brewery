@@ -122,44 +122,41 @@ impl App {
                 };
                 self.last_command_output = lines.into_iter().take(8).collect();
                 if result.success {
-                    self.status = format!("{label} complete", label = message.label);
+                    self.status = format!("{} complete", message.kind);
                     if let Some(pkg) =
-                        package_action_target(&message.label, self.last_command_target.as_deref())
+                        package_action_target(message.kind, self.last_command_target.as_deref())
                     {
                         toast = Some((
                             ToastLevel::Success,
-                            format!("{} succeeded for {pkg}", action_title(&message.label)),
+                            format!("{} succeeded for {pkg}", message.kind.action_title()),
                         ));
-                    } else if message.label == "upgrade-all" {
+                    } else if message.kind == CommandKind::UpgradeAll {
                         toast = Some((
                             ToastLevel::Success,
                             "Upgrade succeeded for outdated packages".to_string(),
                         ));
-                    } else if message.label == "self-update" {
+                    } else if message.kind == CommandKind::SelfUpdate {
                         toast = Some((
                             ToastLevel::Success,
                             "Brewery updated. Restart to use the new version".to_string(),
                         ));
                     }
                 } else {
-                    self.status = format!("{label} failed", label = message.label);
+                    self.status = format!("{} failed", message.kind);
                     if !result.stderr.trim().is_empty() {
                         self.last_command_error = Some(result.stderr.trim().to_string());
                     }
                     if let Some(pkg) =
-                        package_action_target(&message.label, self.last_command_target.as_deref())
+                        package_action_target(message.kind, self.last_command_target.as_deref())
                     {
                         let reason = first_nonempty_line(&result.stderr)
                             .or_else(|| first_nonempty_line(&result.stdout))
                             .unwrap_or("Unknown error");
                         toast = Some((
                             ToastLevel::Error,
-                            format!(
-                                "{} failed for {pkg}: {reason}",
-                                action_title(&message.label)
-                            ),
+                            format!("{} failed for {pkg}: {reason}", message.kind.action_title()),
                         ));
-                    } else if message.label == "upgrade-all" {
+                    } else if message.kind == CommandKind::UpgradeAll {
                         let reason = first_nonempty_line(&result.stderr)
                             .or_else(|| first_nonempty_line(&result.stdout))
                             .unwrap_or("Unknown error");
@@ -167,7 +164,7 @@ impl App {
                             ToastLevel::Error,
                             format!("Upgrade failed for outdated packages: {reason}"),
                         ));
-                    } else if message.label == "self-update" {
+                    } else if message.kind == CommandKind::SelfUpdate {
                         let reason = first_nonempty_line(&result.stderr)
                             .or_else(|| first_nonempty_line(&result.stdout))
                             .unwrap_or("Unknown error");
@@ -178,7 +175,7 @@ impl App {
                     }
                 }
 
-                if message.label == "search" {
+                if message.kind == CommandKind::Search {
                     self.package_results = result
                         .stdout
                         .lines()
@@ -199,29 +196,28 @@ impl App {
                 }
 
                 if result.success
-                    && matches!(message.label.as_str(), "install" | "uninstall" | "upgrade")
+                    && message.kind.is_package_action()
                     && let Some(pkg) = self.last_command_target.clone()
                 {
-                    self.last_command_completed =
-                        Some((message.label.clone(), pkg, Instant::now()));
+                    self.last_command_completed = Some((message.kind, pkg, Instant::now()));
                 }
             }
             Err(err) => {
                 self.last_command_error = Some(err.to_string());
-                self.status = format!("{label} failed", label = message.label);
+                self.status = format!("{} failed", message.kind);
                 if let Some(pkg) =
-                    package_action_target(&message.label, self.last_command_target.as_deref())
+                    package_action_target(message.kind, self.last_command_target.as_deref())
                 {
                     toast = Some((
                         ToastLevel::Error,
-                        format!("{} failed for {pkg}: {}", action_title(&message.label), err),
+                        format!("{} failed for {pkg}: {}", message.kind.action_title(), err),
                     ));
-                } else if message.label == "upgrade-all" {
+                } else if message.kind == CommandKind::UpgradeAll {
                     toast = Some((
                         ToastLevel::Error,
                         format!("Upgrade failed for outdated packages: {err}"),
                     ));
-                } else if message.label == "self-update" {
+                } else if message.kind == CommandKind::SelfUpdate {
                     toast = Some((ToastLevel::Error, format!("Brewery update failed: {err}")));
                 }
             }
@@ -259,20 +255,11 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
     }
 }
 
-fn package_action_target<'a>(label: &str, target: Option<&'a str>) -> Option<&'a str> {
-    if matches!(label, "install" | "uninstall" | "upgrade") {
+fn package_action_target(kind: CommandKind, target: Option<&str>) -> Option<&str> {
+    if kind.is_package_action() {
         return target;
     }
     None
-}
-
-fn action_title(label: &str) -> &'static str {
-    match label {
-        "install" => "Install",
-        "uninstall" => "Uninstall",
-        "upgrade" => "Upgrade",
-        _ => "Action",
-    }
 }
 
 fn first_nonempty_line(text: &str) -> Option<&str> {

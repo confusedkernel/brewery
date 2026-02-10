@@ -3,7 +3,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 
 use crate::app::{App, InputMode};
-use crate::brew::{DetailsLoad, LeavesMessage};
+use crate::brew::{CommandKind, DetailsLoad, LeavesMessage};
 
 pub struct RuntimeChannels {
     pub leaves_tx: mpsc::UnboundedSender<LeavesMessage>,
@@ -61,15 +61,9 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         if let Ok(result) = &message.result
             && result.success
         {
-            should_refresh_leaves = matches!(
-                message.label.as_str(),
-                "install" | "uninstall" | "upgrade" | "upgrade-all"
-            );
-            should_refresh_status = matches!(
-                message.label.as_str(),
-                "install" | "uninstall" | "upgrade" | "upgrade-all"
-            );
-            if message.label == "upgrade" {
+            should_refresh_leaves = message.kind.refreshes_lists_on_success();
+            should_refresh_status = message.kind.refreshes_lists_on_success();
+            if message.kind == CommandKind::Upgrade {
                 refresh_details_pkg = app.last_command_target.clone();
             }
         }

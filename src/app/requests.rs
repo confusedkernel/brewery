@@ -129,7 +129,7 @@ impl App {
 
     pub fn request_command(
         &mut self,
-        label: &str,
+        kind: CommandKind,
         args: &[&str],
         tx: &mpsc::UnboundedSender<CommandMessage>,
     ) {
@@ -138,29 +138,29 @@ impl App {
         }
 
         self.pending_command = true;
-        self.last_command = Some(label.to_string());
-        self.last_command_target = match label {
-            "install" | "uninstall" | "upgrade" => args.last().map(|value| (*value).to_string()),
-            _ => None,
+        self.last_command = Some(kind);
+        self.last_command_target = if kind.is_package_action() {
+            args.last().map(|value| (*value).to_string())
+        } else {
+            None
         };
         self.command_started_at = Some(Instant::now());
         self.last_command_output.clear();
         self.last_command_error = None;
-        self.status = format!("Running {label}...");
+        self.status = format!("Running {kind}...");
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
 
         let tx = tx.clone();
-        let label = label.to_string();
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
         tokio::spawn(async move {
             let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let result = if label == "self-update" {
+            let result = if kind == CommandKind::SelfUpdate {
                 run_command("cargo", &arg_refs).await
             } else {
                 run_brew_command(&arg_refs).await
             };
-            let _ = tx.send(CommandMessage { label, result });
+            let _ = tx.send(CommandMessage { kind, result });
         });
     }
 }

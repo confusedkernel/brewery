@@ -226,19 +226,17 @@ impl App {
 
         let mut count = 0;
         if self.pending_command
-            && matches!(
-                self.last_command.as_deref(),
-                Some("install")
-                    | Some("uninstall")
-                    | Some("upgrade")
-                    | Some("upgrade-all")
-                    | Some("self-update")
-            )
+            && self
+                .last_command
+                .map(CommandKind::is_activity_command)
+                .unwrap_or(false)
         {
             count += 1 + self.last_command_output.len();
             if self.last_command_target.is_some()
-                || self.last_command.as_deref() == Some("upgrade-all")
-                || self.last_command.as_deref() == Some("self-update")
+                || matches!(
+                    self.last_command,
+                    Some(CommandKind::UpgradeAll | CommandKind::SelfUpdate)
+                )
             {
                 count += 1;
             }

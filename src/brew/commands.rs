@@ -1,3 +1,67 @@
+use std::fmt;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommandKind {
+    Search,
+    Install,
+    Uninstall,
+    Upgrade,
+    UpgradeAll,
+    SelfUpdate,
+    Cleanup,
+    Autoremove,
+    BundleDump,
+}
+
+impl CommandKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Search => "search",
+            Self::Install => "install",
+            Self::Uninstall => "uninstall",
+            Self::Upgrade => "upgrade",
+            Self::UpgradeAll => "upgrade-all",
+            Self::SelfUpdate => "self-update",
+            Self::Cleanup => "cleanup",
+            Self::Autoremove => "autoremove",
+            Self::BundleDump => "bundle dump",
+        }
+    }
+
+    pub fn is_package_action(self) -> bool {
+        matches!(self, Self::Install | Self::Uninstall | Self::Upgrade)
+    }
+
+    pub fn is_activity_command(self) -> bool {
+        matches!(
+            self,
+            Self::Install | Self::Uninstall | Self::Upgrade | Self::UpgradeAll | Self::SelfUpdate
+        )
+    }
+
+    pub fn refreshes_lists_on_success(self) -> bool {
+        matches!(
+            self,
+            Self::Install | Self::Uninstall | Self::Upgrade | Self::UpgradeAll
+        )
+    }
+
+    pub fn action_title(self) -> &'static str {
+        match self {
+            Self::Install => "Install",
+            Self::Uninstall => "Uninstall",
+            Self::Upgrade => "Upgrade",
+            _ => "Action",
+        }
+    }
+}
+
+impl fmt::Display for CommandKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandResult {
     pub stdout: String,
@@ -6,7 +70,7 @@ pub struct CommandResult {
 }
 
 pub struct CommandMessage {
-    pub label: String,
+    pub kind: CommandKind,
     pub result: anyhow::Result<CommandResult>,
 }
 
