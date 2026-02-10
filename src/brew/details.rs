@@ -64,7 +64,7 @@ pub async fn fetch_details_basic(pkg: &str) -> anyhow::Result<Details> {
     let info: BrewInfo = serde_json::from_slice(&output.stdout)?;
     let formula = info
         .formulae
-        .get(0)
+        .first()
         .ok_or_else(|| anyhow::anyhow!("No formula info for {pkg}"))?;
 
     let installed = formula

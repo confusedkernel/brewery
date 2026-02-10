@@ -278,10 +278,10 @@ impl App {
 }
 
 fn detect_icon_ascii() -> bool {
-    if let Ok(value) = std::env::var("BREWERY_ASCII") {
-        if value == "1" || value.eq_ignore_ascii_case("true") {
-            return true;
-        }
+    if let Ok(value) = std::env::var("BREWERY_ASCII")
+        && (value == "1" || value.eq_ignore_ascii_case("true"))
+    {
+        return true;
     }
     false
 }

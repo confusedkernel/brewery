@@ -7,7 +7,7 @@ use crate::app::App;
 
 fn build_help_lines(app: &App) -> Vec<Line<'static>> {
     let theme = &app.theme;
-    let keymaps = vec![
+    let keymaps = [
         (
             "Navigation",
             vec![

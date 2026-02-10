@@ -55,27 +55,27 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
     );
 
     // Process version result
-    if let Ok(result) = version_result {
-        if result.success {
-            let mut lines = result
-                .stdout
-                .lines()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty());
-            status.brew_version = lines.next().map(str::to_string);
-        }
+    if let Ok(result) = version_result
+        && result.success
+    {
+        let mut lines = result
+            .stdout
+            .lines()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty());
+        status.brew_version = lines.next().map(str::to_string);
     }
 
     // Process info result
-    if let Ok(result) = info_result {
-        if result.success {
-            status.brew_info = result
-                .stdout
-                .lines()
-                .map(|s| s.trim())
-                .find(|line| !line.is_empty())
-                .map(str::to_string);
-        }
+    if let Ok(result) = info_result
+        && result.success
+    {
+        status.brew_info = result
+            .stdout
+            .lines()
+            .map(|s| s.trim())
+            .find(|line| !line.is_empty())
+            .map(str::to_string);
     }
 
     // Process doctor result
@@ -99,19 +99,17 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
 
     // Process last brew update time from repository metadata
     let mut repo_paths = Vec::new();
-    if let Ok(result) = brew_repo_result {
-        if result.success {
-            if let Some(path) = first_nonempty_line(&result.stdout) {
-                repo_paths.push(path.to_string());
-            }
-        }
+    if let Ok(result) = brew_repo_result
+        && result.success
+        && let Some(path) = first_nonempty_line(&result.stdout)
+    {
+        repo_paths.push(path.to_string());
     }
-    if let Ok(result) = core_repo_result {
-        if result.success {
-            if let Some(path) = first_nonempty_line(&result.stdout) {
-                repo_paths.push(path.to_string());
-            }
-        }
+    if let Ok(result) = core_repo_result
+        && result.success
+        && let Some(path) = first_nonempty_line(&result.stdout)
+    {
+        repo_paths.push(path.to_string());
     }
     status.last_brew_update_secs_ago = last_update_secs_ago(&repo_paths);
     status.brew_update_status = Some(match status.last_brew_update_secs_ago {
@@ -161,14 +159,14 @@ fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
 
     for repo in repo_paths {
         let fetch_head = PathBuf::from(repo).join(".git").join("FETCH_HEAD");
-        if let Ok(metadata) = std::fs::metadata(fetch_head) {
-            if let Ok(modified) = metadata.modified() {
-                latest = Some(
-                    latest
-                        .map(|current| current.max(modified))
-                        .unwrap_or(modified),
-                );
-            }
+        if let Ok(metadata) = std::fs::metadata(fetch_head)
+            && let Ok(modified) = metadata.modified()
+        {
+            latest = Some(
+                latest
+                    .map(|current| current.max(modified))
+                    .unwrap_or(modified),
+            );
         }
     }
 

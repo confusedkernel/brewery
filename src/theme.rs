@@ -89,12 +89,11 @@ pub fn detect_system_theme() -> Theme {
     if let Ok(output) = std::process::Command::new("defaults")
         .args(["read", "-g", "AppleInterfaceStyle"])
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            let style = String::from_utf8_lossy(&output.stdout);
-            if style.trim().eq_ignore_ascii_case("dark") {
-                return Theme::dark();
-            }
+        let style = String::from_utf8_lossy(&output.stdout);
+        if style.trim().eq_ignore_ascii_case("dark") {
+            return Theme::dark();
         }
     }
     Theme::light()

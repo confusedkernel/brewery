@@ -64,14 +64,13 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
             IDLE_TICK_RATE
         };
 
-        if event::poll(tick_rate)? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    let max_offset = help_max_offset(&app);
-                    if let Some(result) = handle_key_event(&mut app, key, &channels, max_offset) {
-                        return result;
-                    }
-                }
+        if event::poll(tick_rate)?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            let max_offset = help_max_offset(&app);
+            if let Some(result) = handle_key_event(&mut app, key, &channels, max_offset) {
+                return result;
             }
         }
 

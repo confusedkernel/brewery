@@ -219,10 +219,10 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         items.push((format!("Version: {ver}{info}"), theme.text_primary));
     }
 
-    if system_status.brewery_update_available {
-        if let Some(latest) = system_status.brewery_latest_version.as_ref() {
-            items.push((format!("Brewery update: v{latest} available"), theme.orange));
-        }
+    if system_status.brewery_update_available
+        && let Some(latest) = system_status.brewery_latest_version.as_ref()
+    {
+        items.push((format!("Brewery update: v{latest} available"), theme.orange));
     }
 
     let doctor_status = match system_status.doctor_ok {

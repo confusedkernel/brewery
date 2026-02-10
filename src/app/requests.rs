@@ -59,20 +59,18 @@ impl App {
     ) {
         let pkg = pkg.to_string();
 
-        if let Some(pending) = self.pending_details.as_ref() {
-            if pending == &pkg {
-                return;
-            }
+        if let Some(pending) = self.pending_details.as_ref()
+            && pending == &pkg
+        {
+            return;
         }
 
-        if !force {
-            if let Some(existing) = self.details_cache.get(&pkg) {
-                match load {
-                    DetailsLoad::Basic => return,
-                    DetailsLoad::Full => {
-                        if existing.deps.is_some() && existing.uses.is_some() {
-                            return;
-                        }
+        if !force && let Some(existing) = self.details_cache.get(&pkg) {
+            match load {
+                DetailsLoad::Basic => return,
+                DetailsLoad::Full => {
+                    if existing.deps.is_some() && existing.uses.is_some() {
+                        return;
                     }
                 }
             }

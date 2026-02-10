@@ -51,12 +51,11 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     };
 
     let mut version_label = format!("v{current_version}");
-    if let Some(status) = app.system_status.as_ref() {
-        if status.brewery_update_available {
-            if let Some(latest) = status.brewery_latest_version.as_ref() {
-                version_label = format!("v{current_version} (update: v{latest})");
-            }
-        }
+    if let Some(status) = app.system_status.as_ref()
+        && status.brewery_update_available
+        && let Some(latest) = status.brewery_latest_version.as_ref()
+    {
+        version_label = format!("v{current_version} (update: v{latest})");
     }
 
     let version_color = if app

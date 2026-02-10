@@ -200,11 +200,10 @@ impl App {
 
                 if result.success
                     && matches!(message.label.as_str(), "install" | "uninstall" | "upgrade")
+                    && let Some(pkg) = self.last_command_target.clone()
                 {
-                    if let Some(pkg) = self.last_command_target.clone() {
-                        self.last_command_completed =
-                            Some((message.label.clone(), pkg, Instant::now()));
-                    }
+                    self.last_command_completed =
+                        Some((message.label.clone(), pkg, Instant::now()));
                 }
             }
             Err(err) => {

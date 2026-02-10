@@ -53,13 +53,10 @@ pub fn handle_key_event(
         InputMode::Normal => match key.code {
             KeyCode::Char('q') => return Some(Ok(())),
             KeyCode::Esc => {
-                if app.pending_package_action.is_some() {
-                    clear_pending_confirmations(app);
-                    set_status(app, "Canceled");
-                } else if app.pending_upgrade_all_outdated {
-                    clear_pending_confirmations(app);
-                    set_status(app, "Canceled");
-                } else if app.pending_self_update {
+                if app.pending_package_action.is_some()
+                    || app.pending_upgrade_all_outdated
+                    || app.pending_self_update
+                {
                     clear_pending_confirmations(app);
                     set_status(app, "Canceled");
                 } else if !app.leaves_query.is_empty() {

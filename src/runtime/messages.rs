@@ -58,23 +58,20 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         let mut should_refresh_leaves = false;
         let mut should_refresh_status = false;
         let mut refresh_details_pkg = None;
-        match &message.result {
-            Ok(result) => {
-                if result.success {
-                    should_refresh_leaves = matches!(
-                        message.label.as_str(),
-                        "install" | "uninstall" | "upgrade" | "upgrade-all"
-                    );
-                    should_refresh_status = matches!(
-                        message.label.as_str(),
-                        "install" | "uninstall" | "upgrade" | "upgrade-all"
-                    );
-                    if message.label == "upgrade" {
-                        refresh_details_pkg = app.last_command_target.clone();
-                    }
-                }
+        if let Ok(result) = &message.result
+            && result.success
+        {
+            should_refresh_leaves = matches!(
+                message.label.as_str(),
+                "install" | "uninstall" | "upgrade" | "upgrade-all"
+            );
+            should_refresh_status = matches!(
+                message.label.as_str(),
+                "install" | "uninstall" | "upgrade" | "upgrade-all"
+            );
+            if message.label == "upgrade" {
+                refresh_details_pkg = app.last_command_target.clone();
             }
-            Err(_) => {}
         }
         app.apply_command_message(message);
         if should_refresh_leaves {
@@ -107,20 +104,19 @@ pub fn handle_auto_details(
     if matches!(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
-    ) {
-        if let Some(pkg) = app.selected_package_result().map(str::to_string) {
-            let already_fetched = app.last_result_details_pkg.as_deref() == Some(pkg.as_str());
-            let debounce_elapsed = app
-                .last_selection_change
-                .map(|t| t.elapsed() >= debounce)
-                .unwrap_or(true);
-            let not_pending = app.pending_details.is_none();
-            let not_scrolling = !app.is_rapid_scrolling();
+    ) && let Some(pkg) = app.selected_package_result().map(str::to_string)
+    {
+        let already_fetched = app.last_result_details_pkg.as_deref() == Some(pkg.as_str());
+        let debounce_elapsed = app
+            .last_selection_change
+            .map(|t| t.elapsed() >= debounce)
+            .unwrap_or(true);
+        let not_pending = app.pending_details.is_none();
+        let not_scrolling = !app.is_rapid_scrolling();
 
-            if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
-                app.request_details_for(&pkg, DetailsLoad::Basic, details_tx);
-                app.last_result_details_pkg = Some(pkg);
-            }
+        if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
+            app.request_details_for(&pkg, DetailsLoad::Basic, details_tx);
+            app.last_result_details_pkg = Some(pkg);
         }
     }
 
