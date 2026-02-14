@@ -42,7 +42,12 @@ impl CommandKind {
     pub fn refreshes_lists_on_success(self) -> bool {
         matches!(
             self,
-            Self::Install | Self::Uninstall | Self::Upgrade | Self::UpgradeAll
+            Self::Install
+                | Self::Uninstall
+                | Self::Upgrade
+                | Self::UpgradeAll
+                | Self::Cleanup
+                | Self::Autoremove
         )
     }
 
@@ -91,4 +96,26 @@ pub async fn run_command(binary: &str, args: &[&str]) -> anyhow::Result<CommandR
         stderr,
         success: output.status.success(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CommandKind;
+
+    #[test]
+    fn refreshes_lists_for_expected_commands() {
+        assert!(CommandKind::Install.refreshes_lists_on_success());
+        assert!(CommandKind::Uninstall.refreshes_lists_on_success());
+        assert!(CommandKind::Upgrade.refreshes_lists_on_success());
+        assert!(CommandKind::UpgradeAll.refreshes_lists_on_success());
+        assert!(CommandKind::Cleanup.refreshes_lists_on_success());
+        assert!(CommandKind::Autoremove.refreshes_lists_on_success());
+    }
+
+    #[test]
+    fn does_not_refresh_lists_for_non_mutating_commands() {
+        assert!(!CommandKind::Search.refreshes_lists_on_success());
+        assert!(!CommandKind::SelfUpdate.refreshes_lists_on_success());
+        assert!(!CommandKind::BundleDump.refreshes_lists_on_success());
+    }
 }

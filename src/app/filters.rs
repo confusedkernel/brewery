@@ -163,3 +163,31 @@ fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
         .windows(needle.len())
         .any(|window| window.eq_ignore_ascii_case(needle))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{contains_ascii_case_insensitive, leaf_matches_query};
+
+    #[test]
+    fn matches_ascii_query_case_insensitively() {
+        assert!(contains_ascii_case_insensitive(b"OpenSSL", b"ssl"));
+        assert!(leaf_matches_query("OpenSSL", "ssl", None, true));
+    }
+
+    #[test]
+    fn rejects_ascii_query_when_not_present() {
+        assert!(!contains_ascii_case_insensitive(b"sqlite", b"brew"));
+        assert!(!leaf_matches_query("sqlite", "brew", None, true));
+    }
+
+    #[test]
+    fn matches_non_ascii_query_using_lowercased_forms() {
+        assert!(leaf_matches_query(
+            "CAFETIERE",
+            "cafetiere",
+            Some("cafetiere"),
+            false
+        ));
+        assert!(leaf_matches_query("naive", "NAIVE", Some("naive"), false));
+    }
+}

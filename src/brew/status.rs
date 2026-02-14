@@ -245,3 +245,32 @@ fn write_cached_latest_brewery_version(version: Option<String>) {
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{is_newer_version, parse_latest_brewery_version, parse_semver_triplet};
+
+    #[test]
+    fn parses_latest_brewery_version_from_cargo_search_output() {
+        let stdout = "brewery = \"0.3.3\"    # A fast, friendly TUI for Homebrew\n";
+        assert_eq!(parse_latest_brewery_version(stdout), Some("0.3.3".to_string()));
+    }
+
+    #[test]
+    fn ignores_unrelated_cargo_search_output() {
+        let stdout = "othercrate = \"1.2.3\"\n";
+        assert_eq!(parse_latest_brewery_version(stdout), None);
+    }
+
+    #[test]
+    fn parse_semver_triplet_drops_prerelease_suffix() {
+        assert_eq!(parse_semver_triplet("1.2.3-beta.1"), (1, 2, 3));
+    }
+
+    #[test]
+    fn compares_versions_using_semver_ordering() {
+        assert!(is_newer_version("0.3.3", "0.3.2"));
+        assert!(!is_newer_version("0.3.2", "0.3.2"));
+        assert!(!is_newer_version("0.3.1", "0.3.2"));
+    }
+}
