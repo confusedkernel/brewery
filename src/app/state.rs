@@ -76,8 +76,7 @@ impl App {
         // This allows the counter to reset if the user pauses
         if self
             .last_selection_change
-            .map(|t| t.elapsed() >= Duration::from_millis(300))
-            .unwrap_or(true)
+            .is_none_or(|t| t.elapsed() >= Duration::from_millis(300))
         {
             self.recent_selection_count = 0;
         }
@@ -93,8 +92,7 @@ impl App {
         if self
             .toast
             .as_ref()
-            .map(|toast| toast.created_at.elapsed() > TOAST_DURATION)
-            .unwrap_or(false)
+            .is_some_and(|toast| toast.created_at.elapsed() > TOAST_DURATION)
         {
             self.toast = None;
             self.needs_redraw = true;
@@ -133,9 +131,8 @@ impl App {
 
     pub fn toggle_icons(&mut self) {
         self.icon_mode = match self.icon_mode {
-            IconMode::Auto => IconMode::Ascii,
             IconMode::Ascii => IconMode::Nerd,
-            IconMode::Nerd => IconMode::Ascii,
+            IconMode::Auto | IconMode::Nerd => IconMode::Ascii,
         };
         self.icons_ascii = match self.icon_mode {
             IconMode::Ascii => true,
@@ -241,17 +238,14 @@ impl App {
     }
 
     pub(super) fn max_status_scroll(&self) -> usize {
-        self.system_status
-            .as_ref()
-            .map(|h| {
-                let count = match self.status_tab {
-                    StatusTab::Outdated => h.outdated_packages.len(),
-                    StatusTab::Issues => h.doctor_issues.len(),
-                    StatusTab::Activity => self.activity_item_count(),
-                };
-                count.saturating_sub(2)
-            })
-            .unwrap_or(0)
+        self.system_status.as_ref().map_or(0, |h| {
+            let count = match self.status_tab {
+                StatusTab::Outdated => h.outdated_packages.len(),
+                StatusTab::Issues => h.doctor_issues.len(),
+                StatusTab::Activity => self.activity_item_count(),
+            };
+            count.saturating_sub(2)
+        })
     }
 
     fn activity_item_count(&self) -> usize {
@@ -263,8 +257,7 @@ impl App {
         if self.pending_command
             && self
                 .last_command
-                .map(CommandKind::is_activity_command)
-                .unwrap_or(false)
+                .is_some_and(CommandKind::is_activity_command)
         {
             count += 1 + self.last_command_output.len();
             if self.last_command_target.is_some()
@@ -279,8 +272,7 @@ impl App {
         if self
             .last_command_completed
             .as_ref()
-            .map(|(_, _, at)| at.elapsed().as_secs() < 3)
-            .unwrap_or(false)
+            .is_some_and(|(_, _, at)| at.elapsed().as_secs() < 3)
         {
             count += 1;
         }

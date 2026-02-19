@@ -486,24 +486,18 @@ fn run_or_confirm_package_action(
         return;
     }
 
+    let confirmation_status =
+        format!("{verb_title} {noun} {pkg}? [{confirm_key}] confirm, [Esc] cancel");
     app.pending_upgrade_all_outdated = false;
-    app.pending_package_action = Some(PendingPackageAction {
-        action,
-        kind,
-        pkg: pkg.clone(),
-    });
-    set_status(
-        app,
-        format!("{verb_title} {noun} {pkg}? [{confirm_key}] confirm, [Esc] cancel"),
-    );
+    app.pending_package_action = Some(PendingPackageAction { action, kind, pkg });
+    set_status(app, confirmation_status);
 }
 
 fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels) {
     let outdated = app
         .system_status
         .as_ref()
-        .map(|status| status.outdated_packages.len())
-        .unwrap_or(0);
+        .map_or(0, |status| status.outdated_packages.len());
     if outdated == 0 {
         set_status(app, "No outdated packages");
         return;
@@ -532,7 +526,7 @@ fn package_action_labels(action: PackageAction) -> (CommandKind, &'static str, &
     }
 }
 
-fn package_action_args<'a>(action: PackageAction, kind: PackageKind, pkg: &'a str) -> Vec<&'a str> {
+fn package_action_args(action: PackageAction, kind: PackageKind, pkg: &str) -> Vec<&str> {
     match (action, kind) {
         (PackageAction::Install, PackageKind::Formula) => vec!["install", pkg],
         (PackageAction::Install, PackageKind::Cask) => vec!["install", "--cask", pkg],

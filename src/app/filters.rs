@@ -119,8 +119,7 @@ impl App {
             self.selected_index = None;
         } else if self
             .selected_index
-            .map(|selected| self.filtered_leaves.contains(&selected))
-            .unwrap_or(false)
+            .is_some_and(|selected| self.filtered_leaves.contains(&selected))
         {
             // keep current selection
         } else {
@@ -201,8 +200,7 @@ impl App {
             self.selected_cask_index = None;
         } else if self
             .selected_cask_index
-            .map(|selected| self.filtered_casks.contains(&selected))
-            .unwrap_or(false)
+            .is_some_and(|selected| self.filtered_casks.contains(&selected))
         {
             // keep current selection
         } else {
