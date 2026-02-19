@@ -7,11 +7,13 @@ use crate::brew::{CommandKind, DetailsLoad, LeavesMessage};
 
 pub struct RuntimeChannels {
     pub leaves_tx: mpsc::UnboundedSender<LeavesMessage>,
+    pub casks_tx: mpsc::UnboundedSender<crate::brew::CasksMessage>,
     pub details_tx: mpsc::UnboundedSender<crate::brew::DetailsMessage>,
     pub sizes_tx: mpsc::UnboundedSender<crate::brew::SizesMessage>,
     pub command_tx: mpsc::UnboundedSender<crate::brew::CommandMessage>,
     pub status_tx: mpsc::UnboundedSender<crate::brew::StatusMessage>,
     pub leaves_rx: mpsc::UnboundedReceiver<LeavesMessage>,
+    pub casks_rx: mpsc::UnboundedReceiver<crate::brew::CasksMessage>,
     pub details_rx: mpsc::UnboundedReceiver<crate::brew::DetailsMessage>,
     pub sizes_rx: mpsc::UnboundedReceiver<crate::brew::SizesMessage>,
     pub command_rx: mpsc::UnboundedReceiver<crate::brew::CommandMessage>,
@@ -20,6 +22,7 @@ pub struct RuntimeChannels {
 
 pub fn create_channels() -> RuntimeChannels {
     let (leaves_tx, leaves_rx) = mpsc::unbounded_channel::<LeavesMessage>();
+    let (casks_tx, casks_rx) = mpsc::unbounded_channel();
     let (details_tx, details_rx) = mpsc::unbounded_channel();
     let (sizes_tx, sizes_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
@@ -27,11 +30,13 @@ pub fn create_channels() -> RuntimeChannels {
 
     RuntimeChannels {
         leaves_tx,
+        casks_tx,
         details_tx,
         sizes_tx,
         command_tx,
         status_tx,
         leaves_rx,
+        casks_rx,
         details_rx,
         sizes_rx,
         command_rx,
@@ -44,6 +49,10 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
 
     while let Ok(message) = channels.leaves_rx.try_recv() {
         app.apply_leaves_message(message);
+        received_message = true;
+    }
+    while let Ok(message) = channels.casks_rx.try_recv() {
+        app.apply_casks_message(message);
         received_message = true;
     }
     while let Ok(message) = channels.details_rx.try_recv() {
@@ -70,6 +79,7 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         app.apply_command_message(message);
         if should_refresh_leaves {
             app.request_leaves(&channels.leaves_tx);
+            app.request_casks(&channels.casks_tx);
         }
         if should_refresh_status {
             app.request_status(&channels.status_tx);
@@ -118,7 +128,7 @@ pub fn handle_auto_details(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
     ) {
-        let selected = app.selected_leaf().map(str::to_string);
+        let selected = app.selected_installed_package().map(str::to_string);
         if let Some(ref pkg) = selected {
             let already_fetched = last_fetched_leaf.as_ref() == Some(pkg);
             let debounce_elapsed = app

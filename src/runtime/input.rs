@@ -3,7 +3,8 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
-    App, FocusedPanel, InputMode, PackageAction, PendingPackageAction, StatusTab, ViewMode,
+    App, FocusedPanel, InputMode, PackageAction, PackageKind, PendingPackageAction, StatusTab,
+    ViewMode,
 };
 use crate::brew::{CommandKind, DetailsLoad};
 use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
@@ -86,13 +87,14 @@ fn handle_normal_mode_key(
                 set_status(app, "Canceled");
             } else if !app.leaves_query.is_empty() {
                 app.leaves_query.clear();
-                app.update_filtered_leaves();
+                app.update_all_installed_filters();
                 set_status(app, "Filters cleared");
             }
             None
         }
         KeyCode::Char('r') => {
             app.request_leaves(&channels.leaves_tx);
+            app.request_casks(&channels.casks_tx);
             None
         }
         KeyCode::Char('t') => {
@@ -117,16 +119,29 @@ fn handle_normal_mode_key(
         KeyCode::Char('/') => {
             app.input_mode = InputMode::SearchLeaves;
             app.leaves_query.clear();
-            app.update_filtered_leaves();
+            app.update_active_installed_filter();
             set_status(app, "Search");
             None
         }
         KeyCode::Char('o') => {
             clear_pending_confirmations(app);
             app.toggle_outdated_filter();
-            if app.leaves_outdated_only && app.system_status.is_none() && !app.pending_status {
+            if app.leaves_outdated_only
+                && !app.is_cask_mode()
+                && app.system_status.is_none()
+                && !app.pending_status
+            {
                 app.request_status(&channels.status_tx);
             }
+            None
+        }
+        KeyCode::Char('C') => {
+            clear_pending_confirmations(app);
+            app.toggle_installed_kind();
+            if app.is_cask_mode() && app.casks.is_empty() && !app.pending_casks {
+                app.request_casks(&channels.casks_tx);
+            }
+            app.update_active_installed_filter();
             None
         }
         KeyCode::Char('f') => {
@@ -138,25 +153,52 @@ fn handle_normal_mode_key(
         }
         KeyCode::Char('i') => {
             if app.focus_panel == FocusedPanel::Leaves {
-                let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                    set_status(app, "No leaf selected");
+                let Some(pkg) = app.selected_installed_package().map(str::to_string) else {
+                    set_status(
+                        app,
+                        format!("No {} selected", app.active_kind_label_singular()),
+                    );
                     return None;
                 };
-                run_or_confirm_package_action(app, channels, PackageAction::Install, pkg);
+                run_or_confirm_package_action(
+                    app,
+                    channels,
+                    PackageAction::Install,
+                    app.active_package_kind,
+                    pkg,
+                );
             } else {
-                set_status(app, "Focus leaves to install");
+                set_status(
+                    app,
+                    format!("Focus {} list to install", app.active_kind_label_singular()),
+                );
             }
             None
         }
         KeyCode::Char('u') => {
             if app.focus_panel == FocusedPanel::Leaves {
-                let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                    set_status(app, "No leaf selected");
+                let Some(pkg) = app.selected_installed_package().map(str::to_string) else {
+                    set_status(
+                        app,
+                        format!("No {} selected", app.active_kind_label_singular()),
+                    );
                     return None;
                 };
-                run_or_confirm_package_action(app, channels, PackageAction::Uninstall, pkg);
+                run_or_confirm_package_action(
+                    app,
+                    channels,
+                    PackageAction::Uninstall,
+                    app.active_package_kind,
+                    pkg,
+                );
             } else {
-                set_status(app, "Focus leaves to uninstall");
+                set_status(
+                    app,
+                    format!(
+                        "Focus {} list to uninstall",
+                        app.active_kind_label_singular()
+                    ),
+                );
             }
             None
         }
@@ -164,13 +206,25 @@ fn handle_normal_mode_key(
             if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Outdated {
                 run_or_confirm_upgrade_all_outdated(app, channels);
             } else if app.focus_panel == FocusedPanel::Leaves {
-                let Some(pkg) = app.selected_leaf().map(str::to_string) else {
-                    set_status(app, "No leaf selected");
+                let Some(pkg) = app.selected_installed_package().map(str::to_string) else {
+                    set_status(
+                        app,
+                        format!("No {} selected", app.active_kind_label_singular()),
+                    );
                     return None;
                 };
-                run_or_confirm_package_action(app, channels, PackageAction::Upgrade, pkg);
+                run_or_confirm_package_action(
+                    app,
+                    channels,
+                    PackageAction::Upgrade,
+                    app.active_package_kind,
+                    pkg,
+                );
             } else {
-                set_status(app, "Focus leaves to upgrade");
+                set_status(
+                    app,
+                    format!("Focus {} list to upgrade", app.active_kind_label_singular()),
+                );
             }
             None
         }
@@ -222,6 +276,10 @@ fn handle_normal_mode_key(
             None
         }
         KeyCode::Char('d') => {
+            if app.is_cask_mode() {
+                set_status(app, "Deps/uses are formula-only");
+                return None;
+            }
             app.request_details(DetailsLoad::Full, &channels.details_tx);
             None
         }
@@ -270,7 +328,7 @@ fn handle_search_leaves_mode_key(app: &mut App, key: KeyEvent) -> Option<anyhow:
         KeyCode::Esc => {
             if !app.leaves_query.is_empty() {
                 app.leaves_query.clear();
-                app.update_filtered_leaves();
+                app.update_active_installed_filter();
             }
             app.input_mode = InputMode::Normal;
             set_status(app, "Ready");
@@ -285,11 +343,11 @@ fn handle_search_leaves_mode_key(app: &mut App, key: KeyEvent) -> Option<anyhow:
         }
         KeyCode::Backspace => {
             app.leaves_query.pop();
-            app.update_filtered_leaves();
+            app.update_active_installed_filter();
         }
         KeyCode::Char(ch) => {
             app.leaves_query.push(ch);
-            app.update_filtered_leaves();
+            app.update_active_installed_filter();
         }
         _ => {}
     }
@@ -383,14 +441,26 @@ fn handle_package_results_mode_key(
                 set_status(app, "No result selected");
                 return None;
             };
-            run_or_confirm_package_action(app, channels, PackageAction::Install, pkg);
+            run_or_confirm_package_action(
+                app,
+                channels,
+                PackageAction::Install,
+                PackageKind::Formula,
+                pkg,
+            );
         }
         KeyCode::Char('u') => {
             let Some(pkg) = app.selected_package_result().map(str::to_string) else {
                 set_status(app, "No result selected");
                 return None;
             };
-            run_or_confirm_package_action(app, channels, PackageAction::Uninstall, pkg);
+            run_or_confirm_package_action(
+                app,
+                channels,
+                PackageAction::Uninstall,
+                PackageKind::Formula,
+                pkg,
+            );
         }
         _ => {}
     }
@@ -401,26 +471,30 @@ fn run_or_confirm_package_action(
     app: &mut App,
     channels: &RuntimeChannels,
     action: PackageAction,
+    kind: PackageKind,
     pkg: String,
 ) {
-    let (kind, verb_ing, verb_title, confirm_key) = package_action_labels(action);
+    let (command_kind, verb_ing, verb_title, confirm_key) = package_action_labels(action);
+    let noun = package_kind_noun(kind);
 
-    if matches!(app.pending_package_action.as_ref(), Some(pending) if pending.action == action && pending.pkg == pkg)
+    if matches!(app.pending_package_action.as_ref(), Some(pending) if pending.action == action && pending.kind == kind && pending.pkg == pkg)
     {
-        app.request_command(kind, &[kind.label(), &pkg], &channels.command_tx);
+        let args = package_action_args(action, kind, &pkg);
+        app.request_command(command_kind, &args, &channels.command_tx);
         clear_pending_confirmations(app);
-        set_status(app, format!("{verb_ing}..."));
+        set_status(app, format!("{verb_ing} {noun}..."));
         return;
     }
 
     app.pending_upgrade_all_outdated = false;
     app.pending_package_action = Some(PendingPackageAction {
         action,
+        kind,
         pkg: pkg.clone(),
     });
     set_status(
         app,
-        format!("{verb_title} {pkg}? [{confirm_key}] confirm, [Esc] cancel"),
+        format!("{verb_title} {noun} {pkg}? [{confirm_key}] confirm, [Esc] cancel"),
     );
 }
 
@@ -455,6 +529,24 @@ fn package_action_labels(action: PackageAction) -> (CommandKind, &'static str, &
         PackageAction::Install => (CommandKind::Install, "Installing", "Install", 'i'),
         PackageAction::Uninstall => (CommandKind::Uninstall, "Uninstalling", "Uninstall", 'u'),
         PackageAction::Upgrade => (CommandKind::Upgrade, "Upgrading", "Upgrade", 'U'),
+    }
+}
+
+fn package_action_args<'a>(action: PackageAction, kind: PackageKind, pkg: &'a str) -> Vec<&'a str> {
+    match (action, kind) {
+        (PackageAction::Install, PackageKind::Formula) => vec!["install", pkg],
+        (PackageAction::Install, PackageKind::Cask) => vec!["install", "--cask", pkg],
+        (PackageAction::Uninstall, PackageKind::Formula) => vec!["uninstall", pkg],
+        (PackageAction::Uninstall, PackageKind::Cask) => vec!["uninstall", "--cask", pkg],
+        (PackageAction::Upgrade, PackageKind::Formula) => vec!["upgrade", pkg],
+        (PackageAction::Upgrade, PackageKind::Cask) => vec!["upgrade", "--cask", pkg],
+    }
+}
+
+fn package_kind_noun(kind: PackageKind) -> &'static str {
+    match kind {
+        PackageKind::Formula => "formula",
+        PackageKind::Cask => "cask",
     }
 }
 

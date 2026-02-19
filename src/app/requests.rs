@@ -25,7 +25,7 @@ impl App {
         load: DetailsLoad,
         tx: &mpsc::UnboundedSender<DetailsMessage>,
     ) {
-        let Some(pkg) = self.selected_leaf().map(str::to_string) else {
+        let Some(pkg) = self.selected_installed_package().map(str::to_string) else {
             return;
         };
 
@@ -110,6 +110,23 @@ impl App {
         });
     }
 
+    pub fn request_casks(&mut self, tx: &mpsc::UnboundedSender<CasksMessage>) {
+        if self.pending_casks {
+            return;
+        }
+
+        self.pending_casks = true;
+        self.status = "Loading casks...".to_string();
+        self.last_refresh = Instant::now();
+        self.needs_redraw = true;
+
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let result = fetch_casks().await;
+            let _ = tx.send(CasksMessage { result });
+        });
+    }
+
     pub fn request_status(&mut self, tx: &mpsc::UnboundedSender<StatusMessage>) {
         if self.pending_status {
             return;
@@ -144,6 +161,7 @@ impl App {
         } else {
             None
         };
+        self.last_command_target_is_cask = kind.is_package_action() && args.contains(&"--cask");
         self.command_started_at = Some(Instant::now());
         self.last_command_output.clear();
         self.last_command_error = None;

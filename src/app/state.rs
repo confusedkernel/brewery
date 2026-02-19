@@ -13,14 +13,18 @@ impl App {
             input_mode: InputMode::Normal,
             leaves_query: String::new(),
             package_query: String::new(),
+            active_package_kind: PackageKind::Formula,
             leaves: Vec::new(),
+            casks: Vec::new(),
             filtered_leaves: Vec::new(),
+            filtered_casks: Vec::new(),
             outdated_leaves: std::collections::HashSet::new(),
             filtered_leaves_dirty: true,
             package_results_selected: None,
             last_package_search: None,
             last_result_details_pkg: None,
             selected_index: Some(0),
+            selected_cask_index: Some(0),
             details_cache: LruCache::new(NonZeroUsize::new(DETAILS_CACHE_CAPACITY).unwrap()),
             pending_details: None,
             package_results: Vec::new(),
@@ -32,6 +36,7 @@ impl App {
             pending_command: false,
             last_command: None,
             last_command_target: None,
+            last_command_target_is_cask: false,
             command_started_at: None,
             last_command_completed: None,
             last_command_output: Vec::new(),
@@ -41,7 +46,9 @@ impl App {
             pending_upgrade_all_outdated: false,
             pending_self_update: false,
             pending_leaves: false,
+            pending_casks: false,
             last_leaves_refresh: None,
+            last_casks_refresh: None,
             last_sizes_refresh: None,
             focus_panel: FocusedPanel::Leaves,
             sizes_scroll_offset: 0,
@@ -173,6 +180,34 @@ impl App {
         self.help_scroll_offset = 0;
     }
 
+    pub fn toggle_installed_kind(&mut self) {
+        self.active_package_kind = match self.active_package_kind {
+            PackageKind::Formula => PackageKind::Cask,
+            PackageKind::Cask => PackageKind::Formula,
+        };
+
+        if self.active_package_kind == PackageKind::Cask && self.leaves_outdated_only {
+            self.leaves_outdated_only = false;
+        }
+
+        self.status = format!("View: {}", self.active_kind_label_plural());
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn active_kind_label_singular(&self) -> &'static str {
+        match self.active_package_kind {
+            PackageKind::Formula => "formula",
+            PackageKind::Cask => "cask",
+        }
+    }
+
+    pub fn active_kind_label_plural(&self) -> &'static str {
+        match self.active_package_kind {
+            PackageKind::Formula => "formulae",
+            PackageKind::Cask => "casks",
+        }
+    }
+
     pub fn scroll_focused_up(&mut self) {
         match self.focus_panel {
             FocusedPanel::Leaves => self.select_prev(),
@@ -263,6 +298,9 @@ impl App {
             count += 1;
         }
         if self.last_leaves_refresh.is_some() {
+            count += 1;
+        }
+        if self.last_casks_refresh.is_some() {
             count += 1;
         }
         if self.last_sizes_refresh.is_some() {

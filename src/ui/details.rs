@@ -157,7 +157,24 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             )));
         }
 
-        if let Some(deps) = details.deps.as_ref() {
+        if let Some(artifacts) = details.artifacts.as_ref() {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("  Artifacts ({})", artifacts.len()),
+                Style::default().fg(theme.orange),
+            )));
+            lines.extend(format_list_multiline(app, artifacts, theme, "    "));
+        }
+
+        let is_cask = details.artifacts.is_some();
+
+        if is_cask {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Dependencies: not available for casks".to_string(),
+                Style::default().fg(theme.text_muted),
+            )));
+        } else if let Some(deps) = details.deps.as_ref() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("  Dependencies ({})", deps.len()),
@@ -176,7 +193,13 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             )));
         }
 
-        if let Some(uses) = details.uses.as_ref() {
+        if is_cask {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Used by: not available for casks".to_string(),
+                Style::default().fg(theme.text_muted),
+            )));
+        } else if let Some(uses) = details.uses.as_ref() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 format!("  Used by ({})", uses.len()),

@@ -33,48 +33,74 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         };
         (title, items, app.package_results_selected)
     } else {
-        let leaves = &app.filtered_leaves;
-        let filter_suffix = if app.leaves_outdated_only {
-            format!(" {} outdated", symbol(app, "·", "|"))
-        } else {
-            String::new()
-        };
-        let title = format!(" Leaves ({}){}", leaves.len(), filter_suffix);
-        let items = if leaves.is_empty() {
-            let empty_label = if app.leaves_outdated_only {
-                if app.system_status.is_some() {
-                    "  No outdated leaves"
-                } else {
-                    "  No outdated data yet (press h)"
-                }
+        if app.is_cask_mode() {
+            let casks = &app.filtered_casks;
+            let title = format!(" Casks ({})", casks.len());
+            let items = if casks.is_empty() {
+                vec![ListItem::new(Line::from(Span::styled(
+                    "  No casks found",
+                    Style::default().fg(theme.text_muted),
+                )))]
             } else {
-                "  No leaves found"
+                casks
+                    .iter()
+                    .filter_map(|idx| app.casks.get(*idx))
+                    .map(|item| {
+                        ListItem::new(Line::from(Span::styled(
+                            format!(" {item}"),
+                            Style::default().fg(theme.text_primary),
+                        )))
+                    })
+                    .collect()
             };
-            vec![ListItem::new(Line::from(Span::styled(
-                empty_label,
-                Style::default().fg(theme.text_muted),
-            )))]
+            let selected = app
+                .selected_cask_index
+                .and_then(|selected| casks.iter().position(|idx| *idx == selected));
+            (title, items, selected)
         } else {
-            leaves
-                .iter()
-                .filter_map(|idx| app.leaves.get(*idx))
-                .map(|item| {
-                    let marker = if app.is_outdated_leaf(item.as_str()) {
-                        format!("{} ", symbol(app, "↑", "^"))
+            let leaves = &app.filtered_leaves;
+            let filter_suffix = if app.leaves_outdated_only {
+                format!(" {} outdated", symbol(app, "·", "|"))
+            } else {
+                String::new()
+            };
+            let title = format!(" Leaves ({}){}", leaves.len(), filter_suffix);
+            let items = if leaves.is_empty() {
+                let empty_label = if app.leaves_outdated_only {
+                    if app.system_status.is_some() {
+                        "  No outdated leaves"
                     } else {
-                        String::new()
-                    };
-                    ListItem::new(Line::from(Span::styled(
-                        format!(" {marker}{item}"),
-                        Style::default().fg(theme.text_primary),
-                    )))
-                })
-                .collect()
-        };
-        let selected = app
-            .selected_index
-            .and_then(|selected| leaves.iter().position(|idx| *idx == selected));
-        (title, items, selected)
+                        "  No outdated data yet (press h)"
+                    }
+                } else {
+                    "  No leaves found"
+                };
+                vec![ListItem::new(Line::from(Span::styled(
+                    empty_label,
+                    Style::default().fg(theme.text_muted),
+                )))]
+            } else {
+                leaves
+                    .iter()
+                    .filter_map(|idx| app.leaves.get(*idx))
+                    .map(|item| {
+                        let marker = if app.is_outdated_leaf(item.as_str()) {
+                            format!("{} ", symbol(app, "↑", "^"))
+                        } else {
+                            String::new()
+                        };
+                        ListItem::new(Line::from(Span::styled(
+                            format!(" {marker}{item}"),
+                            Style::default().fg(theme.text_primary),
+                        )))
+                    })
+                    .collect()
+            };
+            let selected = app
+                .selected_index
+                .and_then(|selected| leaves.iter().position(|idx| *idx == selected));
+            (title, items, selected)
+        }
     };
 
     let border_color = if is_focused {

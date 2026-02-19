@@ -31,6 +31,7 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
 
     // Kick off all startup fetches in parallel (non-blocking)
     app.request_leaves(&channels.leaves_tx);
+    app.request_casks(&channels.casks_tx);
     app.request_status(&channels.status_tx);
     app.request_sizes(&channels.sizes_tx);
 

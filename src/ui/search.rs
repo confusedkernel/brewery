@@ -10,11 +10,15 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let theme = &app.theme;
 
     let search_icon = icon_label(app, "󰍉", "");
+    let installed_label = app.active_kind_label_plural();
 
     // Padding (replace with smarter implementation soon)
     let title_prefix = if app.icons_ascii { "" } else { " " };
     let (label, is_active) = match app.input_mode {
-        InputMode::SearchLeaves => (format!("{title_prefix}{search_icon} Search leaves"), true),
+        InputMode::SearchLeaves => (
+            format!("{title_prefix}{search_icon} Search {installed_label}"),
+            true,
+        ),
         InputMode::PackageSearch => (format!("{title_prefix}{search_icon} Search packages"), true),
         InputMode::PackageResults => (
             format!("{title_prefix}{search_icon} Package results"),
@@ -49,7 +53,7 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
             Span::styled(hint, Style::default().fg(theme.text_muted))
         } else {
             Span::styled(
-                "f package, / leaves, o outdated-only",
+                "f package, / installed, C switch list, o outdated-only",
                 Style::default().fg(theme.text_muted),
             )
         }

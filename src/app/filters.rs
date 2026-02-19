@@ -1,11 +1,21 @@
 use super::*;
 
 impl App {
+    pub fn is_cask_mode(&self) -> bool {
+        self.active_package_kind == PackageKind::Cask
+    }
+
     pub fn is_outdated_leaf(&self, pkg: &str) -> bool {
         self.outdated_leaves.contains(pkg)
     }
 
     pub fn toggle_outdated_filter(&mut self) {
+        if self.is_cask_mode() {
+            self.status = "Outdated filter only applies to formulae".to_string();
+            self.last_refresh = Instant::now();
+            return;
+        }
+
         self.leaves_outdated_only = !self.leaves_outdated_only;
         self.update_filtered_leaves();
         if self.leaves_outdated_only {
@@ -27,6 +37,14 @@ impl App {
             InputMode::PackageSearch | InputMode::PackageResults
         ) {
             self.selected_package_result()
+        } else {
+            self.selected_installed_package()
+        }
+    }
+
+    pub fn selected_installed_package(&self) -> Option<&str> {
+        if self.is_cask_mode() {
+            self.selected_cask()
         } else {
             self.selected_leaf()
         }
@@ -63,6 +81,19 @@ impl App {
         self.package_results_selected = None;
         self.last_package_search = None;
         self.last_result_details_pkg = None;
+    }
+
+    pub fn update_all_installed_filters(&mut self) {
+        self.update_filtered_leaves();
+        self.update_filtered_casks();
+    }
+
+    pub fn update_active_installed_filter(&mut self) {
+        if self.is_cask_mode() {
+            self.update_filtered_casks();
+        } else {
+            self.update_filtered_leaves();
+        }
     }
 
     pub fn update_filtered_leaves(&mut self) {
@@ -102,7 +133,17 @@ impl App {
         self.leaves.get(selected).map(String::as_str)
     }
 
+    pub fn selected_cask(&self) -> Option<&str> {
+        let selected = self.selected_cask_index?;
+        self.casks.get(selected).map(String::as_str)
+    }
+
     pub fn select_next(&mut self) {
+        if self.is_cask_mode() {
+            self.select_next_cask();
+            return;
+        }
+
         if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
@@ -119,6 +160,11 @@ impl App {
     }
 
     pub fn select_prev(&mut self) {
+        if self.is_cask_mode() {
+            self.select_prev_cask();
+            return;
+        }
+
         if self.filtered_leaves.is_empty() {
             self.selected_index = None;
             return;
@@ -132,6 +178,68 @@ impl App {
             None => 0,
         };
         self.selected_index = self.filtered_leaves.get(prev_pos).copied();
+    }
+
+    pub fn update_filtered_casks(&mut self) {
+        let query = self.leaves_query.trim();
+        let has_query = !query.is_empty();
+        let query_is_ascii = query.is_ascii();
+        let query_lower = (!query_is_ascii && has_query).then(|| query.to_lowercase());
+
+        self.filtered_casks = self
+            .casks
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                !has_query
+                    || leaf_matches_query(item, query, query_lower.as_deref(), query_is_ascii)
+            })
+            .map(|(idx, _)| idx)
+            .collect();
+
+        if self.filtered_casks.is_empty() {
+            self.selected_cask_index = None;
+        } else if self
+            .selected_cask_index
+            .map(|selected| self.filtered_casks.contains(&selected))
+            .unwrap_or(false)
+        {
+            // keep current selection
+        } else {
+            self.selected_cask_index = self.filtered_casks.first().copied();
+        }
+    }
+
+    fn select_next_cask(&mut self) {
+        if self.filtered_casks.is_empty() {
+            self.selected_cask_index = None;
+            return;
+        }
+
+        let current_pos = self
+            .selected_cask_index
+            .and_then(|selected| self.filtered_casks.iter().position(|idx| *idx == selected));
+        let next_pos = match current_pos {
+            Some(pos) => (pos + 1).min(self.filtered_casks.len() - 1),
+            None => 0,
+        };
+        self.selected_cask_index = self.filtered_casks.get(next_pos).copied();
+    }
+
+    fn select_prev_cask(&mut self) {
+        if self.filtered_casks.is_empty() {
+            self.selected_cask_index = None;
+            return;
+        }
+
+        let current_pos = self
+            .selected_cask_index
+            .and_then(|selected| self.filtered_casks.iter().position(|idx| *idx == selected));
+        let prev_pos = match current_pos {
+            Some(pos) => pos.saturating_sub(1),
+            None => 0,
+        };
+        self.selected_cask_index = self.filtered_casks.get(prev_pos).copied();
     }
 }
 

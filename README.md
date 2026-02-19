@@ -20,6 +20,7 @@ _Browse, search, and manage your Homebrew packages with ease_
 ## Features
 
 - **📦 Package Browser** — Browse installed leaves with instant search filtering
+- **🍻 Cask Browser** — Toggle to installed casks and manage them with the same quick actions
 - **🔍 Advanced Search** — Search all available Homebrew packages
 - **📊 Rich Details** — View descriptions, homepage, versions, dependencies, and reverse dependencies
 - **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
@@ -54,12 +55,13 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | ------------------ | -------------------------- |
 | `j`/`k` or `↑`/`↓` | Move selection             |
 | `Tab`/`Shift+Tab`  | Cycle focus between panels |
+| `Shift+C`          | Toggle formulae/casks list |
 
 ### Search
 
 | Key     | Action                                |
 | ------- | ------------------------------------- |
-| `/`     | Filter installed leaves (live filter) |
+| `/`     | Filter installed list (formulae/casks) |
 | `f`     | Search all packages                   |
 | `Enter` | Confirm search / Exit filter mode     |
 | `Esc`   | Cancel / Clear filter                 |
@@ -68,9 +70,9 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 
 | Key     | Action                                     |
 | ------- | ------------------------------------------ |
-| `i`     | Install package (press twice to confirm)   |
-| `u`     | Uninstall package (press twice to confirm) |
-| `Shift+U` | Upgrade selected leaf, or upgrade all outdated in Status -> Outdated (press twice to confirm) |
+| `i`     | Install selected formula/cask (press twice to confirm)   |
+| `u`     | Uninstall selected formula/cask (press twice to confirm) |
+| `Shift+U` | Upgrade selected formula/cask, or upgrade all outdated formulae in Status -> Outdated (press twice to confirm) |
 | `Enter` | Load package details                       |
 | `d`     | Load dependencies and reverse dependencies |
 
@@ -82,7 +84,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | `s` | Load package sizes             |
 | `h` | Run status check               |
 | `Shift+P` | Update Brewery via Cargo (press twice to confirm) |
-| `o` | Toggle outdated-only leaves filter |
+| `o` | Toggle outdated-only formula filter |
 | `c` | Cleanup old versions           |
 | `a` | Autoremove unused dependencies |
 | `b` | Export Brewfile (bundle dump)  |

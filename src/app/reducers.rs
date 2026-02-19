@@ -81,6 +81,35 @@ impl App {
         self.needs_redraw = true;
     }
 
+    pub fn apply_casks_message(&mut self, message: CasksMessage) {
+        match message.result {
+            Ok(mut casks) => {
+                casks.sort();
+                self.casks = casks;
+                self.update_filtered_casks();
+                if self.casks.is_empty() {
+                    self.selected_cask_index = None;
+                } else if self
+                    .selected_cask_index
+                    .map(|idx| idx >= self.casks.len())
+                    .unwrap_or(true)
+                {
+                    self.selected_cask_index = Some(0);
+                }
+                self.last_casks_refresh = Some(Instant::now());
+                self.last_error = None;
+                self.status = "Casks updated".to_string();
+            }
+            Err(err) => {
+                self.last_error = Some(err.to_string());
+                self.status = "Casks refresh failed".to_string();
+            }
+        }
+        self.pending_casks = false;
+        self.last_refresh = Instant::now();
+        self.needs_redraw = true;
+    }
+
     pub fn apply_status_message(&mut self, message: StatusMessage) {
         match message.result {
             Ok(status_snapshot) => {
@@ -252,6 +281,9 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
     }
     if incoming.uses.is_some() {
         existing.uses = incoming.uses.clone();
+    }
+    if incoming.artifacts.is_some() {
+        existing.artifacts = incoming.artifacts.clone();
     }
 }
 

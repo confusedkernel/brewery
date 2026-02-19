@@ -22,9 +22,16 @@ pub enum PackageAction {
     Upgrade,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PackageKind {
+    Formula,
+    Cask,
+}
+
 #[derive(Clone, PartialEq)]
 pub struct PendingPackageAction {
     pub action: PackageAction,
+    pub kind: PackageKind,
     pub pkg: String,
 }
 

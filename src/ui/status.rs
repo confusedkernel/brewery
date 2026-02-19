@@ -167,8 +167,13 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
             .last_command
             .map(|kind| kind.label())
             .unwrap_or("command");
+        let cask_flag = if app.last_command_target_is_cask {
+            " --cask"
+        } else {
+            ""
+        };
         items.push((
-            format!("Command: brew {command} {target}"),
+            format!("Command: brew {command}{cask_flag} {target}"),
             theme.text_muted,
         ));
     } else if app.last_command == Some(CommandKind::UpgradeAll) {
@@ -274,6 +279,12 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
     if let Some(t) = app.last_leaves_refresh {
         items.push((
             format!("Leaves refresh: {}s ago", t.elapsed().as_secs()),
+            theme.text_muted,
+        ));
+    }
+    if let Some(t) = app.last_casks_refresh {
+        items.push((
+            format!("Casks refresh: {}s ago", t.elapsed().as_secs()),
             theme.text_muted,
         ));
     }

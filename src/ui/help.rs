@@ -42,7 +42,11 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
         ),
         (
             "Search",
-            vec![("/", "Search leaves"), ("f", "Find packages")],
+            vec![
+                ("/", "Search installed list"),
+                ("f", "Find packages"),
+                ("C", "Toggle formula/cask list"),
+            ],
         ),
         (
             "Actions",
@@ -53,13 +57,13 @@ fn build_help_lines(app: &App) -> Vec<Line<'static>> {
                 ("u", "Uninstall selected (confirm)"),
                 ("U", "Upgrade selected or all outdated (confirm)"),
                 ("P", "Update Brewery via cargo (confirm)"),
-                ("o", "Toggle outdated-only leaves filter"),
+                ("o", "Toggle outdated-only formula filter"),
             ],
         ),
         (
             "Data",
             vec![
-                ("r", "Refresh leaves"),
+                ("r", "Refresh formulae + casks"),
                 ("s", "Load sizes"),
                 ("h", "Status check"),
             ],

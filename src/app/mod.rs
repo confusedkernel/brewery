@@ -5,8 +5,8 @@ mod state;
 mod types;
 
 pub use types::{
-    FocusedPanel, IconMode, InputMode, PackageAction, PendingPackageAction, StatusTab, Toast,
-    ToastLevel, ViewMode,
+    FocusedPanel, IconMode, InputMode, PackageAction, PackageKind, PendingPackageAction, StatusTab,
+    Toast, ToastLevel, ViewMode,
 };
 
 use std::collections::HashSet;
@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 
 use crate::brew::{
-    CommandKind, CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage, SizeEntry,
-    SizesMessage, StatusMessage, StatusSnapshot, fetch_details_basic, fetch_details_full,
-    fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
+    CasksMessage, CommandKind, CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage,
+    SizeEntry, SizesMessage, StatusMessage, StatusSnapshot, fetch_casks, fetch_details_basic,
+    fetch_details_full, fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -36,14 +36,18 @@ pub struct App {
     pub input_mode: InputMode,
     pub leaves_query: String,
     pub package_query: String,
+    pub active_package_kind: PackageKind,
     pub leaves: Vec<String>,
+    pub casks: Vec<String>,
     pub filtered_leaves: Vec<usize>,
+    pub filtered_casks: Vec<usize>,
     pub outdated_leaves: HashSet<String>,
     pub filtered_leaves_dirty: bool,
     pub package_results_selected: Option<usize>,
     pub last_package_search: Option<String>,
     pub last_result_details_pkg: Option<String>,
     pub selected_index: Option<usize>,
+    pub selected_cask_index: Option<usize>,
     pub details_cache: LruCache<String, Details>,
     pub pending_details: Option<String>,
     pub package_results: Vec<String>,
@@ -55,6 +59,7 @@ pub struct App {
     pub pending_command: bool,
     pub last_command: Option<CommandKind>,
     pub last_command_target: Option<String>,
+    pub last_command_target_is_cask: bool,
     pub command_started_at: Option<Instant>,
     pub last_command_completed: Option<(CommandKind, String, Instant)>,
     pub last_command_output: Vec<String>,
@@ -64,7 +69,9 @@ pub struct App {
     pub pending_upgrade_all_outdated: bool,
     pub pending_self_update: bool,
     pub pending_leaves: bool,
+    pub pending_casks: bool,
     pub last_leaves_refresh: Option<Instant>,
+    pub last_casks_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
     pub focus_panel: FocusedPanel,
     pub sizes_scroll_offset: usize,

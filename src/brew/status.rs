@@ -253,7 +253,10 @@ mod tests {
     #[test]
     fn parses_latest_brewery_version_from_cargo_search_output() {
         let stdout = "brewery = \"0.3.3\"    # A fast, friendly TUI for Homebrew\n";
-        assert_eq!(parse_latest_brewery_version(stdout), Some("0.3.3".to_string()));
+        assert_eq!(
+            parse_latest_brewery_version(stdout),
+            Some("0.3.3".to_string())
+        );
     }
 
     #[test]
