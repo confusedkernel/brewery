@@ -61,6 +61,7 @@ impl App {
             leaves_outdated_only: false,
             show_help_popup: false,
             help_scroll_offset: 0,
+            help_selected_command: 0,
             needs_redraw: true,
             last_selection_change: None,
             recent_selection_count: 0,
@@ -175,6 +176,7 @@ impl App {
     pub fn toggle_help(&mut self) {
         self.show_help_popup = !self.show_help_popup;
         self.help_scroll_offset = 0;
+        self.help_selected_command = 0;
     }
 
     pub fn toggle_installed_kind(&mut self) {

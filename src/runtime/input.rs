@@ -8,6 +8,13 @@ use crate::app::{
 };
 use crate::brew::{CommandKind, DetailsLoad};
 use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
+use crate::ui::help;
+
+enum HelpPopupAction {
+    NotHandled,
+    Handled,
+    Execute(KeyEvent),
+}
 
 pub fn handle_key_event(
     app: &mut App,
@@ -21,8 +28,14 @@ pub fn handle_key_event(
         return None;
     }
 
-    if handle_help_popup_input(app, key, help_max_offset) {
-        return None;
+    match handle_help_popup_input(app, key, help_max_offset) {
+        HelpPopupAction::NotHandled => {}
+        HelpPopupAction::Handled => return None,
+        HelpPopupAction::Execute(command_key) => {
+            app.show_help_popup = false;
+            app.help_scroll_offset = 0;
+            return handle_key_event(app, command_key, channels, help_max_offset);
+        }
     }
 
     match app.input_mode {
@@ -51,27 +64,69 @@ fn handle_global_keymaps(app: &mut App, key: KeyEvent) -> bool {
     false
 }
 
-fn handle_help_popup_input(app: &mut App, key: KeyEvent, help_max_offset: usize) -> bool {
+fn handle_help_popup_input(
+    app: &mut App,
+    key: KeyEvent,
+    help_max_offset: usize,
+) -> HelpPopupAction {
     if !app.show_help_popup {
-        return false;
+        return HelpPopupAction::NotHandled;
+    }
+
+    let command_count = help::help_command_count(app);
+    if command_count == 0 {
+        app.help_selected_command = 0;
+    } else {
+        app.help_selected_command = app.help_selected_command.min(command_count - 1);
     }
 
     match key.code {
-        KeyCode::Esc => {
+        KeyCode::Esc | KeyCode::Char('?') => {
             app.show_help_popup = false;
+            app.help_scroll_offset = 0;
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if app.help_scroll_offset < help_max_offset {
-                app.help_scroll_offset += 1;
+            if command_count > 0 {
+                app.help_selected_command = (app.help_selected_command + 1).min(command_count - 1);
+                sync_help_scroll_to_selection(app, help_max_offset);
             }
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            app.help_scroll_offset = app.help_scroll_offset.saturating_sub(1);
+            if command_count > 0 {
+                app.help_selected_command = app.help_selected_command.saturating_sub(1);
+                sync_help_scroll_to_selection(app, help_max_offset);
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(command_key) = help::help_selected_command_key(app) {
+                return HelpPopupAction::Execute(command_key);
+            }
         }
         _ => {}
     }
 
-    true
+    HelpPopupAction::Handled
+}
+
+fn sync_help_scroll_to_selection(app: &mut App, help_max_offset: usize) {
+    let Some(selected_line) = help::help_command_line(app, app.help_selected_command) else {
+        app.help_scroll_offset = 0;
+        return;
+    };
+
+    let total_lines = help::help_line_count(app);
+    let visible_height = total_lines.saturating_sub(help_max_offset).max(1);
+
+    if selected_line < app.help_scroll_offset {
+        app.help_scroll_offset = selected_line;
+    } else {
+        let visible_end = app.help_scroll_offset + visible_height;
+        if selected_line >= visible_end {
+            app.help_scroll_offset = selected_line + 1 - visible_height;
+        }
+    }
+
+    app.help_scroll_offset = app.help_scroll_offset.min(help_max_offset);
 }
 
 fn handle_normal_mode_key(

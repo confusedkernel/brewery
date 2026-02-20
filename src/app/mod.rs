@@ -84,6 +84,7 @@ pub struct App {
     pub leaves_outdated_only: bool,
     pub show_help_popup: bool,
     pub help_scroll_offset: usize,
+    pub help_selected_command: usize,
     pub needs_redraw: bool,
     pub last_selection_change: Option<Instant>,
     /// Count of recent selection changes (for detecting rapid scrolling)

@@ -30,16 +30,17 @@ pub fn draw(frame: &mut ratatui::Frame, app: &App) {
         ])
         .split(frame.area());
 
-    draw_header(frame, layout[0], app);
+    let dimmed = app.show_help_popup;
+    draw_header(frame, layout[0], app, dimmed);
     draw_body(frame, layout[1], app);
-    footer::draw_footer(frame, layout[2], app);
+    footer::draw_footer(frame, layout[2], app, dimmed);
 
     if app.show_help_popup {
         help::draw_help_popup(frame, app);
     }
 }
 
-fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
+fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App, dimmed: bool) {
     let theme = &app.theme;
     let uptime = app.started_at.elapsed().as_secs();
     let current_version = env!("CARGO_PKG_VERSION");
@@ -89,7 +90,8 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         ),
     ]);
 
-    let header = Paragraph::new(line).style(Style::default().bg(theme.bg_panel));
+    let bg = if dimmed { theme.bg_dim } else { theme.bg_panel };
+    let header = Paragraph::new(line).style(Style::default().bg(bg));
     frame.render_widget(header, area);
 }
 

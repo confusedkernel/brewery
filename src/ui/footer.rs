@@ -5,7 +5,7 @@ use ratatui::widgets::Paragraph;
 
 use crate::app::App;
 
-pub fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
+pub fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App, dimmed: bool) {
     let theme = &app.theme;
 
     let keys = vec![
@@ -14,7 +14,6 @@ pub fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
         ("i", "install"),
         ("u", "uninstall"),
         ("U", "upgrade"),
-        ("C", "formula/cask"),
         ("f,/", "search"),
         ("?", "help"),
     ];
@@ -36,6 +35,7 @@ pub fn draw_footer(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let mut all_spans = vec![Span::raw(" ")];
     all_spans.extend(spans);
     let line = Line::from(all_spans);
-    let footer = Paragraph::new(line).style(Style::default().bg(theme.bg_panel));
+    let bg = if dimmed { theme.bg_dim } else { theme.bg_panel };
+    let footer = Paragraph::new(line).style(Style::default().bg(bg));
     frame.render_widget(footer, area);
 }

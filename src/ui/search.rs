@@ -53,7 +53,7 @@ pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
             Span::styled(hint, Style::default().fg(theme.text_muted))
         } else {
             Span::styled(
-                "f package, / installed, C switch list, o outdated-only",
+                "f package, / installed, o outdated-only",
                 Style::default().fg(theme.text_muted),
             )
         }
