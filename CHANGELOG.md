@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-22
+
+### Added
+- Cask support across installed list and package details, including cask artifact rendering
+- Installed-list mode toggle between formulae and casks via `Shift+C`
+- Help panel command selection and execution flow
+- Automatic status refresh after `autoremove` and `cleanup`
+
+### Changed
+- Cask data loading now uses Homebrew's cask list/info paths where formula-only data is not applicable
+
+### Refactored
+- Input handling split into per-mode command pathways for lower complexity and less duplication
+- Command execution flow migrated from string labels to a typed `CommandKind` model
+- Internal app structure split into smaller reusable modules for maintainability
+- General logic simplification and clippy cleanup
+
 ## [0.3.2] - 2026-02-09
 
 ### Changed
