@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use tokio::sync::mpsc;
 
 use super::*;
@@ -9,14 +11,12 @@ impl App {
         }
 
         self.pending_leaves = true;
-        self.status = "Loading leaves...".to_string();
-        self.last_refresh = Instant::now();
-        self.needs_redraw = true;
+        set_request_status(self, "Loading leaves...", true);
 
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let result = fetch_leaves().await;
-            let _ = tx.send(LeavesMessage { result });
+        spawn_request(tx, async {
+            LeavesMessage {
+                result: fetch_leaves().await,
+            }
         });
     }
 
@@ -77,19 +77,21 @@ impl App {
         }
 
         self.pending_details = Some(pkg.clone());
-        self.status = match load {
-            DetailsLoad::Basic => "Loading details...".to_string(),
-            DetailsLoad::Full => "Loading deps/uses...".to_string(),
-        };
-        self.last_refresh = Instant::now();
+        set_request_status(
+            self,
+            match load {
+                DetailsLoad::Basic => "Loading details...",
+                DetailsLoad::Full => "Loading deps/uses...",
+            },
+            false,
+        );
 
-        let tx = tx.clone();
-        tokio::spawn(async move {
+        spawn_request(tx, async move {
             let result = match load {
                 DetailsLoad::Basic => fetch_details_basic(&pkg).await,
                 DetailsLoad::Full => fetch_details_full(&pkg).await,
             };
-            let _ = tx.send(DetailsMessage { pkg, load, result });
+            DetailsMessage { pkg, load, result }
         });
     }
 
@@ -99,14 +101,12 @@ impl App {
         }
 
         self.pending_sizes = true;
-        self.status = "Loading sizes...".to_string();
-        self.last_refresh = Instant::now();
-        self.needs_redraw = true;
+        set_request_status(self, "Loading sizes...", true);
 
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let result = fetch_sizes().await;
-            let _ = tx.send(SizesMessage { result });
+        spawn_request(tx, async {
+            SizesMessage {
+                result: fetch_sizes().await,
+            }
         });
     }
 
@@ -116,14 +116,12 @@ impl App {
         }
 
         self.pending_casks = true;
-        self.status = "Loading casks...".to_string();
-        self.last_refresh = Instant::now();
-        self.needs_redraw = true;
+        set_request_status(self, "Loading casks...", true);
 
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let result = fetch_casks().await;
-            let _ = tx.send(CasksMessage { result });
+        spawn_request(tx, async {
+            CasksMessage {
+                result: fetch_casks().await,
+            }
         });
     }
 
@@ -133,14 +131,12 @@ impl App {
         }
 
         self.pending_status = true;
-        self.status = "Checking status...".to_string();
-        self.last_refresh = Instant::now();
-        self.needs_redraw = true;
+        set_request_status(self, "Checking status...", true);
 
-        let tx = tx.clone();
-        tokio::spawn(async move {
-            let result = fetch_status().await;
-            let _ = tx.send(StatusMessage { result });
+        spawn_request(tx, async {
+            StatusMessage {
+                result: fetch_status().await,
+            }
         });
     }
 
@@ -181,4 +177,24 @@ impl App {
             let _ = tx.send(CommandMessage { kind, result });
         });
     }
+}
+
+fn set_request_status(app: &mut App, status: &str, needs_redraw: bool) {
+    app.status = status.to_string();
+    app.last_refresh = Instant::now();
+    if needs_redraw {
+        app.needs_redraw = true;
+    }
+}
+
+fn spawn_request<Message, Fut>(tx: &mpsc::UnboundedSender<Message>, task: Fut)
+where
+    Message: Send + 'static,
+    Fut: Future<Output = Message> + Send + 'static,
+{
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let message = task.await;
+        let _ = tx.send(message);
+    });
 }

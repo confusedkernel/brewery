@@ -1,3 +1,5 @@
+use super::process::{ensure_success, nonempty_lines, run_brew};
+
 #[derive(Clone, Debug)]
 pub struct Details {
     pub desc: Option<String>,
@@ -47,20 +49,10 @@ struct InstalledInfo {
 }
 
 pub async fn fetch_details_basic(pkg: &str) -> anyhow::Result<Details> {
-    let output = tokio::process::Command::new("brew")
-        .args(["info", "--json=v2", pkg])
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            format!("brew info failed for {pkg}")
-        } else {
-            stderr
-        };
-        return Err(anyhow::anyhow!(message));
-    }
+    let args = ["info", "--json=v2", pkg];
+    let output = run_brew(&args).await?;
+    let fallback = format!("brew info failed for {pkg}");
+    ensure_success(&output, &fallback)?;
 
     let info: BrewInfo = serde_json::from_slice(&output.stdout)?;
     if let Some(formula) = info.formulae.first() {
@@ -102,26 +94,9 @@ pub async fn fetch_details_full(pkg: &str) -> anyhow::Result<Details> {
 }
 
 async fn run_brew_lines_async<const N: usize>(args: [&str; N]) -> anyhow::Result<Vec<String>> {
-    let output = tokio::process::Command::new("brew")
-        .args(args)
-        .output()
-        .await?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "brew command failed".to_string()
-        } else {
-            stderr
-        };
-        return Err(anyhow::anyhow!(message));
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|line| line.to_string())
-        .collect())
+    let output = run_brew(&args).await?;
+    ensure_success(&output, "brew command failed")?;
+    Ok(nonempty_lines(&output.stdout))
 }
 
 fn parse_cask_details(doc: &serde_json::Value) -> Option<Details> {

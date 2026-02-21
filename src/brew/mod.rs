@@ -2,6 +2,7 @@ mod casks;
 mod commands;
 mod details;
 mod leaves;
+mod process;
 mod size;
 mod status;
 

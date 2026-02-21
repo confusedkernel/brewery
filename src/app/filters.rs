@@ -55,11 +55,11 @@ impl App {
             self.package_results_selected = None;
             return;
         }
-        let next = match self.package_results_selected {
-            Some(idx) => (idx + 1).min(self.package_results.len() - 1),
-            None => 0,
-        };
-        self.package_results_selected = Some(next);
+        step_linear_selection(
+            self.package_results.len(),
+            &mut self.package_results_selected,
+            StepDirection::Next,
+        );
         self.last_result_details_pkg = None;
     }
 
@@ -68,11 +68,11 @@ impl App {
             self.package_results_selected = None;
             return;
         }
-        let prev = match self.package_results_selected {
-            Some(idx) => idx.saturating_sub(1),
-            None => 0,
-        };
-        self.package_results_selected = Some(prev);
+        step_linear_selection(
+            self.package_results.len(),
+            &mut self.package_results_selected,
+            StepDirection::Prev,
+        );
         self.last_result_details_pkg = None;
     }
 
@@ -99,32 +99,11 @@ impl App {
     pub fn update_filtered_leaves(&mut self) {
         self.filtered_leaves_dirty = false;
 
-        let query = self.leaves_query.trim();
-        let has_query = !query.is_empty();
-        let query_is_ascii = query.is_ascii();
-        let query_lower = (!query_is_ascii && has_query).then(|| query.to_lowercase());
-        self.filtered_leaves = self
-            .leaves
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| !self.leaves_outdated_only || self.is_outdated_leaf(item))
-            .filter(|(_, item)| {
-                !has_query
-                    || leaf_matches_query(item, query, query_lower.as_deref(), query_is_ascii)
-            })
-            .map(|(idx, _)| idx)
-            .collect();
+        self.filtered_leaves = build_filtered_indices(&self.leaves, &self.leaves_query, |item| {
+            !self.leaves_outdated_only || self.is_outdated_leaf(item)
+        });
 
-        if self.filtered_leaves.is_empty() {
-            self.selected_index = None;
-        } else if self
-            .selected_index
-            .is_some_and(|selected| self.filtered_leaves.contains(&selected))
-        {
-            // keep current selection
-        } else {
-            self.selected_index = self.filtered_leaves.first().copied();
-        }
+        reconcile_selection(&self.filtered_leaves, &mut self.selected_index);
     }
 
     pub fn selected_leaf(&self) -> Option<&str> {
@@ -139,105 +118,108 @@ impl App {
 
     pub fn select_next(&mut self) {
         if self.is_cask_mode() {
-            self.select_next_cask();
+            step_filtered_selection(
+                &self.filtered_casks,
+                &mut self.selected_cask_index,
+                StepDirection::Next,
+            );
             return;
         }
 
-        if self.filtered_leaves.is_empty() {
-            self.selected_index = None;
-            return;
-        }
-
-        let current_pos = self
-            .selected_index
-            .and_then(|selected| self.filtered_leaves.iter().position(|idx| *idx == selected));
-        let next_pos = match current_pos {
-            Some(pos) => (pos + 1).min(self.filtered_leaves.len() - 1),
-            None => 0,
-        };
-        self.selected_index = self.filtered_leaves.get(next_pos).copied();
+        step_filtered_selection(
+            &self.filtered_leaves,
+            &mut self.selected_index,
+            StepDirection::Next,
+        );
     }
 
     pub fn select_prev(&mut self) {
         if self.is_cask_mode() {
-            self.select_prev_cask();
+            step_filtered_selection(
+                &self.filtered_casks,
+                &mut self.selected_cask_index,
+                StepDirection::Prev,
+            );
             return;
         }
 
-        if self.filtered_leaves.is_empty() {
-            self.selected_index = None;
-            return;
-        }
-
-        let current_pos = self
-            .selected_index
-            .and_then(|selected| self.filtered_leaves.iter().position(|idx| *idx == selected));
-        let prev_pos = match current_pos {
-            Some(pos) => pos.saturating_sub(1),
-            None => 0,
-        };
-        self.selected_index = self.filtered_leaves.get(prev_pos).copied();
+        step_filtered_selection(
+            &self.filtered_leaves,
+            &mut self.selected_index,
+            StepDirection::Prev,
+        );
     }
 
     pub fn update_filtered_casks(&mut self) {
-        let query = self.leaves_query.trim();
-        let has_query = !query.is_empty();
-        let query_is_ascii = query.is_ascii();
-        let query_lower = (!query_is_ascii && has_query).then(|| query.to_lowercase());
+        self.filtered_casks = build_filtered_indices(&self.casks, &self.leaves_query, |_| true);
+        reconcile_selection(&self.filtered_casks, &mut self.selected_cask_index);
+    }
+}
 
-        self.filtered_casks = self
-            .casks
-            .iter()
-            .enumerate()
-            .filter(|(_, item)| {
-                !has_query
-                    || leaf_matches_query(item, query, query_lower.as_deref(), query_is_ascii)
-            })
-            .map(|(idx, _)| idx)
-            .collect();
+#[derive(Clone, Copy)]
+enum StepDirection {
+    Next,
+    Prev,
+}
 
-        if self.filtered_casks.is_empty() {
-            self.selected_cask_index = None;
-        } else if self
-            .selected_cask_index
-            .is_some_and(|selected| self.filtered_casks.contains(&selected))
-        {
-            // keep current selection
-        } else {
-            self.selected_cask_index = self.filtered_casks.first().copied();
-        }
+fn build_filtered_indices<F>(items: &[String], query: &str, mut include: F) -> Vec<usize>
+where
+    F: FnMut(&str) -> bool,
+{
+    let query = query.trim();
+    let has_query = !query.is_empty();
+    let query_is_ascii = query.is_ascii();
+    let query_lower = (!query_is_ascii && has_query).then(|| query.to_lowercase());
+
+    items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| include(item.as_str()))
+        .filter(|(_, item)| {
+            !has_query || leaf_matches_query(item, query, query_lower.as_deref(), query_is_ascii)
+        })
+        .map(|(idx, _)| idx)
+        .collect()
+}
+
+fn reconcile_selection(filtered: &[usize], selected: &mut Option<usize>) {
+    if filtered.is_empty() {
+        *selected = None;
+        return;
     }
 
-    fn select_next_cask(&mut self) {
-        if self.filtered_casks.is_empty() {
-            self.selected_cask_index = None;
-            return;
-        }
-
-        let current_pos = self
-            .selected_cask_index
-            .and_then(|selected| self.filtered_casks.iter().position(|idx| *idx == selected));
-        let next_pos = match current_pos {
-            Some(pos) => (pos + 1).min(self.filtered_casks.len() - 1),
-            None => 0,
-        };
-        self.selected_cask_index = self.filtered_casks.get(next_pos).copied();
+    if selected.is_some_and(|idx| filtered.contains(&idx)) {
+        return;
     }
 
-    fn select_prev_cask(&mut self) {
-        if self.filtered_casks.is_empty() {
-            self.selected_cask_index = None;
-            return;
-        }
+    *selected = filtered.first().copied();
+}
 
-        let current_pos = self
-            .selected_cask_index
-            .and_then(|selected| self.filtered_casks.iter().position(|idx| *idx == selected));
-        let prev_pos = match current_pos {
-            Some(pos) => pos.saturating_sub(1),
-            None => 0,
-        };
-        self.selected_cask_index = self.filtered_casks.get(prev_pos).copied();
+fn step_filtered_selection(
+    filtered: &[usize],
+    selected: &mut Option<usize>,
+    direction: StepDirection,
+) {
+    if filtered.is_empty() {
+        *selected = None;
+        return;
+    }
+
+    let current_pos =
+        selected.and_then(|idx| filtered.iter().position(|candidate| *candidate == idx));
+    let next_pos = step_position(current_pos, filtered.len(), direction);
+    *selected = filtered.get(next_pos).copied();
+}
+
+fn step_linear_selection(len: usize, selected: &mut Option<usize>, direction: StepDirection) {
+    let next = step_position(*selected, len, direction);
+    *selected = Some(next);
+}
+
+fn step_position(current: Option<usize>, len: usize, direction: StepDirection) -> usize {
+    match direction {
+        StepDirection::Next => current.map_or(0, |idx| (idx + 1).min(len - 1)),
+        StepDirection::Prev => current.map_or(0, |idx| idx.saturating_sub(1)),
     }
 }
 

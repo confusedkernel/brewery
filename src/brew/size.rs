@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use super::process::{ensure_success, run_brew};
+
 #[derive(Clone, Debug)]
 pub struct SizeEntry {
     pub name: String,
@@ -62,20 +64,8 @@ fn parse_du_line(line: &str) -> Option<SizeEntry> {
 }
 
 async fn fetch_cellar_path() -> anyhow::Result<PathBuf> {
-    let output = tokio::process::Command::new("brew")
-        .arg("--cellar")
-        .output()
-        .await?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "brew --cellar failed".to_string()
-        } else {
-            stderr
-        };
-        return Err(anyhow::anyhow!(message));
-    }
+    let output = run_brew(&["--cellar"]).await?;
+    ensure_success(&output, "brew --cellar failed")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let path = stdout.trim();
