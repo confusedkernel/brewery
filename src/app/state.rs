@@ -43,10 +43,17 @@ impl App {
             last_command_error: None,
             last_error: None,
             pending_package_action: None,
+            pending_service_action: None,
             pending_upgrade_all_outdated: false,
             pending_self_update: false,
+            command_history: VecDeque::with_capacity(COMMAND_HISTORY_CAPACITY),
+            last_command_args: Vec::new(),
             pending_leaves: false,
             pending_casks: false,
+            pending_leaves_started_at: None,
+            pending_casks_started_at: None,
+            pending_sizes_started_at: None,
+            pending_status_started_at: None,
             last_leaves_refresh: None,
             last_casks_refresh: None,
             last_sizes_refresh: None,
@@ -58,6 +65,7 @@ impl App {
             pending_status: false,
             last_status_check: None,
             status_tab: StatusTab::default(),
+            services_selected_index: None,
             leaves_outdated_only: false,
             show_help_popup: false,
             help_scroll_offset: 0,
@@ -69,7 +77,12 @@ impl App {
     }
 
     pub fn on_tick(&mut self) {
-        if self.pending_command {
+        if self.pending_command
+            || self.pending_leaves
+            || self.pending_casks
+            || self.pending_sizes
+            || self.pending_status
+        {
             self.needs_redraw = true;
         }
 
@@ -159,16 +172,20 @@ impl App {
         self.status_tab = match self.status_tab {
             StatusTab::Activity => StatusTab::Issues,
             StatusTab::Issues => StatusTab::Outdated,
-            StatusTab::Outdated => StatusTab::Activity,
+            StatusTab::Outdated => StatusTab::Services,
+            StatusTab::Services => StatusTab::History,
+            StatusTab::History => StatusTab::Activity,
         };
         self.status_scroll_offset = 0; // Reset scroll when switching tabs
     }
 
     pub fn status_tab_prev(&mut self) {
         self.status_tab = match self.status_tab {
-            StatusTab::Activity => StatusTab::Outdated,
+            StatusTab::Activity => StatusTab::History,
             StatusTab::Issues => StatusTab::Activity,
             StatusTab::Outdated => StatusTab::Issues,
+            StatusTab::Services => StatusTab::Outdated,
+            StatusTab::History => StatusTab::Services,
         };
         self.status_scroll_offset = 0;
     }
@@ -214,7 +231,22 @@ impl App {
                 self.sizes_scroll_offset = self.sizes_scroll_offset.saturating_sub(1);
             }
             FocusedPanel::Status => {
-                self.status_scroll_offset = self.status_scroll_offset.saturating_sub(1);
+                if self.status_tab == StatusTab::Services {
+                    let services_len = self
+                        .system_status
+                        .as_ref()
+                        .map_or(0, |snapshot| snapshot.services.len());
+                    if services_len == 0 {
+                        self.services_selected_index = None;
+                        self.status_scroll_offset = 0;
+                        return;
+                    }
+                    let next = self.services_selected_index.unwrap_or(0).saturating_sub(1);
+                    self.services_selected_index = Some(next);
+                    self.status_scroll_offset = next;
+                } else {
+                    self.status_scroll_offset = self.status_scroll_offset.saturating_sub(1);
+                }
             }
             FocusedPanel::Details => {
                 self.details_scroll_offset = self.details_scroll_offset.saturating_sub(1);
@@ -230,8 +262,27 @@ impl App {
                 self.sizes_scroll_offset = (self.sizes_scroll_offset + 1).min(max_scroll);
             }
             FocusedPanel::Status => {
-                let max_scroll = self.max_status_scroll();
-                self.status_scroll_offset = (self.status_scroll_offset + 1).min(max_scroll);
+                if self.status_tab == StatusTab::Services {
+                    let services_len = self
+                        .system_status
+                        .as_ref()
+                        .map_or(0, |snapshot| snapshot.services.len());
+                    if services_len == 0 {
+                        self.services_selected_index = None;
+                        self.status_scroll_offset = 0;
+                        return;
+                    }
+                    let max_index = self
+                        .system_status
+                        .as_ref()
+                        .map_or(0, |s| s.services.len().saturating_sub(1));
+                    let next = (self.services_selected_index.unwrap_or(0) + 1).min(max_index);
+                    self.services_selected_index = Some(next);
+                    self.status_scroll_offset = next;
+                } else {
+                    let max_scroll = self.max_status_scroll();
+                    self.status_scroll_offset = (self.status_scroll_offset + 1).min(max_scroll);
+                }
             }
             FocusedPanel::Details => {
                 self.details_scroll_offset += 1;
@@ -244,6 +295,8 @@ impl App {
             let count = match self.status_tab {
                 StatusTab::Outdated => h.outdated_packages.len(),
                 StatusTab::Issues => h.doctor_issues.len(),
+                StatusTab::Services => h.services.len(),
+                StatusTab::History => self.command_history.len(),
                 StatusTab::Activity => self.activity_item_count(),
             };
             count.saturating_sub(2)
@@ -301,6 +354,18 @@ impl App {
             count += 1;
         }
         if self.last_command.is_some() {
+            count += 1;
+        }
+        if self.pending_leaves {
+            count += 1;
+        }
+        if self.pending_casks {
+            count += 1;
+        }
+        if self.pending_sizes {
+            count += 1;
+        }
+        if self.pending_status {
             count += 1;
         }
         count

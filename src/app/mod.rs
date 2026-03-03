@@ -5,11 +5,12 @@ mod state;
 mod types;
 
 pub use types::{
-    FocusedPanel, IconMode, InputMode, PackageAction, PackageKind, PendingPackageAction, StatusTab,
-    Toast, ToastLevel, ViewMode,
+    CommandHistoryEntry, FocusedPanel, IconMode, InputMode, PackageAction, PackageKind,
+    PendingPackageAction, PendingServiceAction, ServiceAction, StatusTab, Toast, ToastLevel,
+    ViewMode,
 };
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,7 @@ use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
 /// Maximum number of package details to cache
 const DETAILS_CACHE_CAPACITY: usize = 64;
+const COMMAND_HISTORY_CAPACITY: usize = 24;
 const TOAST_DURATION: Duration = Duration::from_secs(5);
 
 pub struct App {
@@ -66,10 +68,17 @@ pub struct App {
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,
     pub pending_package_action: Option<PendingPackageAction>,
+    pub pending_service_action: Option<PendingServiceAction>,
     pub pending_upgrade_all_outdated: bool,
     pub pending_self_update: bool,
+    pub command_history: VecDeque<CommandHistoryEntry>,
+    pub last_command_args: Vec<String>,
     pub pending_leaves: bool,
     pub pending_casks: bool,
+    pub pending_leaves_started_at: Option<Instant>,
+    pub pending_casks_started_at: Option<Instant>,
+    pub pending_sizes_started_at: Option<Instant>,
+    pub pending_status_started_at: Option<Instant>,
     pub last_leaves_refresh: Option<Instant>,
     pub last_casks_refresh: Option<Instant>,
     pub last_sizes_refresh: Option<Instant>,
@@ -81,6 +90,7 @@ pub struct App {
     pub pending_status: bool,
     pub last_status_check: Option<Instant>,
     pub status_tab: StatusTab,
+    pub services_selected_index: Option<usize>,
     pub leaves_outdated_only: bool,
     pub show_help_popup: bool,
     pub help_scroll_offset: usize,

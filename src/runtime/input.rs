@@ -3,8 +3,8 @@ use std::time::Instant;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
-    App, FocusedPanel, InputMode, PackageAction, PackageKind, PendingPackageAction, StatusTab,
-    ViewMode,
+    App, FocusedPanel, InputMode, PackageAction, PackageKind, PendingPackageAction,
+    PendingServiceAction, ServiceAction, StatusTab, ViewMode,
 };
 use crate::brew::{CommandKind, DetailsLoad};
 use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
@@ -307,6 +307,36 @@ fn handle_normal_mode_key(
             );
             None
         }
+        KeyCode::Char('S') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                let Some(service) = app.selected_service().map(str::to_string) else {
+                    set_status(app, "No service selected");
+                    return None;
+                };
+                run_or_confirm_service_action(app, channels, ServiceAction::Start, service);
+            }
+            None
+        }
+        KeyCode::Char('X') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                let Some(service) = app.selected_service().map(str::to_string) else {
+                    set_status(app, "No service selected");
+                    return None;
+                };
+                run_or_confirm_service_action(app, channels, ServiceAction::Stop, service);
+            }
+            None
+        }
+        KeyCode::Char('R') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                let Some(service) = app.selected_service().map(str::to_string) else {
+                    set_status(app, "No service selected");
+                    return None;
+                };
+                run_or_confirm_service_action(app, channels, ServiceAction::Restart, service);
+            }
+            None
+        }
         KeyCode::Char('P') => {
             if app.pending_self_update {
                 app.request_command(
@@ -573,6 +603,31 @@ fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels
     );
 }
 
+fn run_or_confirm_service_action(
+    app: &mut App,
+    channels: &RuntimeChannels,
+    action: ServiceAction,
+    service: String,
+) {
+    let (command_kind, verb_ing, verb_title, confirm_key) = service_action_labels(action);
+
+    if matches!(app.pending_service_action.as_ref(), Some(pending) if pending.action == action && pending.service == service)
+    {
+        let args = service_action_args(action, &service);
+        app.request_command(command_kind, &args, &channels.command_tx);
+        clear_pending_confirmations(app);
+        set_status(app, format!("{verb_ing} service..."));
+        return;
+    }
+
+    let confirmation_status =
+        format!("{verb_title} service {service}? [{confirm_key}] confirm, [Esc] cancel");
+    app.pending_package_action = None;
+    app.pending_upgrade_all_outdated = false;
+    app.pending_service_action = Some(PendingServiceAction { action, service });
+    set_status(app, confirmation_status);
+}
+
 fn package_action_labels(action: PackageAction) -> (CommandKind, &'static str, &'static str, char) {
     match action {
         PackageAction::Install => (CommandKind::Install, "Installing", "Install", 'i'),
@@ -599,14 +654,32 @@ fn package_kind_noun(kind: PackageKind) -> &'static str {
     }
 }
 
+fn service_action_labels(action: ServiceAction) -> (CommandKind, &'static str, &'static str, char) {
+    match action {
+        ServiceAction::Start => (CommandKind::ServiceStart, "Starting", "Start", 'S'),
+        ServiceAction::Stop => (CommandKind::ServiceStop, "Stopping", "Stop", 'X'),
+        ServiceAction::Restart => (CommandKind::ServiceRestart, "Restarting", "Restart", 'R'),
+    }
+}
+
+fn service_action_args(action: ServiceAction, service: &str) -> Vec<&str> {
+    match action {
+        ServiceAction::Start => vec!["services", "start", service],
+        ServiceAction::Stop => vec!["services", "stop", service],
+        ServiceAction::Restart => vec!["services", "restart", service],
+    }
+}
+
 fn has_pending_confirmation(app: &App) -> bool {
     app.pending_package_action.is_some()
+        || app.pending_service_action.is_some()
         || app.pending_upgrade_all_outdated
         || app.pending_self_update
 }
 
 fn clear_pending_confirmations(app: &mut App) {
     app.pending_package_action = None;
+    app.pending_service_action = None;
     app.pending_upgrade_all_outdated = false;
     app.pending_self_update = false;
 }

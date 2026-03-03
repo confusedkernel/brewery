@@ -71,7 +71,7 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
             && result.success
         {
             should_refresh_leaves = message.kind.refreshes_lists_on_success();
-            should_refresh_status = message.kind.refreshes_lists_on_success();
+            should_refresh_status = message.kind.refreshes_status_on_success();
             if message.kind == CommandKind::Upgrade {
                 refresh_details_pkg = app.last_command_target.clone();
             }

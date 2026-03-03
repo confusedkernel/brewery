@@ -7,6 +7,9 @@ pub enum CommandKind {
     Uninstall,
     Upgrade,
     UpgradeAll,
+    ServiceStart,
+    ServiceStop,
+    ServiceRestart,
     SelfUpdate,
     Cleanup,
     Autoremove,
@@ -21,6 +24,9 @@ impl CommandKind {
             Self::Uninstall => "uninstall",
             Self::Upgrade => "upgrade",
             Self::UpgradeAll => "upgrade-all",
+            Self::ServiceStart => "services start",
+            Self::ServiceStop => "services stop",
+            Self::ServiceRestart => "services restart",
             Self::SelfUpdate => "self-update",
             Self::Cleanup => "cleanup",
             Self::Autoremove => "autoremove",
@@ -32,10 +38,28 @@ impl CommandKind {
         matches!(self, Self::Install | Self::Uninstall | Self::Upgrade)
     }
 
+    pub fn is_service_action(self) -> bool {
+        matches!(
+            self,
+            Self::ServiceStart | Self::ServiceStop | Self::ServiceRestart
+        )
+    }
+
+    pub fn has_named_target(self) -> bool {
+        self.is_package_action() || self.is_service_action()
+    }
+
     pub fn is_activity_command(self) -> bool {
         matches!(
             self,
-            Self::Install | Self::Uninstall | Self::Upgrade | Self::UpgradeAll | Self::SelfUpdate
+            Self::Install
+                | Self::Uninstall
+                | Self::Upgrade
+                | Self::UpgradeAll
+                | Self::ServiceStart
+                | Self::ServiceStop
+                | Self::ServiceRestart
+                | Self::SelfUpdate
         )
     }
 
@@ -51,11 +75,18 @@ impl CommandKind {
         )
     }
 
+    pub fn refreshes_status_on_success(self) -> bool {
+        self.refreshes_lists_on_success() || self.is_service_action()
+    }
+
     pub fn action_title(self) -> &'static str {
         match self {
             Self::Install => "Install",
             Self::Uninstall => "Uninstall",
             Self::Upgrade => "Upgrade",
+            Self::ServiceStart => "Start service",
+            Self::ServiceStop => "Stop service",
+            Self::ServiceRestart => "Restart service",
             _ => "Action",
         }
     }
@@ -72,6 +103,7 @@ pub struct CommandResult {
     pub stdout: String,
     pub stderr: String,
     pub success: bool,
+    pub exit_code: Option<i32>,
 }
 
 pub struct CommandMessage {
@@ -95,6 +127,7 @@ pub async fn run_command(binary: &str, args: &[&str]) -> anyhow::Result<CommandR
         stdout,
         stderr,
         success: output.status.success(),
+        exit_code: output.status.code(),
     })
 }
 
@@ -117,5 +150,13 @@ mod tests {
         assert!(!CommandKind::Search.refreshes_lists_on_success());
         assert!(!CommandKind::SelfUpdate.refreshes_lists_on_success());
         assert!(!CommandKind::BundleDump.refreshes_lists_on_success());
+        assert!(!CommandKind::ServiceStart.refreshes_lists_on_success());
+    }
+
+    #[test]
+    fn refreshes_status_for_service_actions() {
+        assert!(CommandKind::ServiceStart.refreshes_status_on_success());
+        assert!(CommandKind::ServiceStop.refreshes_status_on_success());
+        assert!(CommandKind::ServiceRestart.refreshes_status_on_success());
     }
 }

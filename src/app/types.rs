@@ -22,6 +22,13 @@ pub enum PackageAction {
     Upgrade,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ServiceAction {
+    Start,
+    Stop,
+    Restart,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PackageKind {
     Formula,
@@ -33,6 +40,12 @@ pub struct PendingPackageAction {
     pub action: PackageAction,
     pub kind: PackageKind,
     pub pkg: String,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct PendingServiceAction {
+    pub action: ServiceAction,
+    pub service: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -55,6 +68,18 @@ pub enum StatusTab {
     Activity,
     Issues,
     Outdated,
+    Services,
+    History,
+}
+
+#[derive(Clone)]
+pub struct CommandHistoryEntry {
+    pub kind: String,
+    pub command: String,
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub finished_at: Instant,
+    pub duration_secs: u64,
 }
 
 #[derive(Clone, Copy, PartialEq)]

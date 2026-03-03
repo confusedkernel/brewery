@@ -50,6 +50,15 @@ impl App {
         }
     }
 
+    pub fn selected_service(&self) -> Option<&str> {
+        let selected = self.services_selected_index?;
+        let snapshot = self.system_status.as_ref()?;
+        snapshot
+            .services
+            .get(selected)
+            .map(|service| service.name.as_str())
+    }
+
     pub fn select_next_result(&mut self) {
         if self.package_results.is_empty() {
             self.package_results_selected = None;

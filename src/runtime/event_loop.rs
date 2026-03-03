@@ -22,6 +22,9 @@ const IDLE_TICK_RATE: Duration = Duration::from_secs(1);
 /// Details will only be fetched after the user has stopped on an item for this duration.
 const DETAILS_DEBOUNCE: Duration = Duration::from_millis(300);
 
+/// Periodic background status refresh (doctor/outdated/services).
+const BACKGROUND_STATUS_REFRESH: Duration = Duration::from_secs(5 * 60);
+
 pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
     let mut app = App::new();
     let mut channels = create_channels();
@@ -50,6 +53,15 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
 
         process_pending_messages(&mut app, &mut channels);
 
+        if !app.pending_command
+            && !app.pending_status
+            && app
+                .last_status_check
+                .is_some_and(|last| last.elapsed() >= BACKGROUND_STATUS_REFRESH)
+        {
+            app.request_status(&channels.status_tx);
+        }
+
         // Debounced auto-fetch details for package search results
         // Skip if user is rapidly scrolling to reduce CPU load
         handle_auto_details(
@@ -59,7 +71,12 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
             DETAILS_DEBOUNCE,
         );
 
-        let tick_rate = if app.pending_command {
+        let tick_rate = if app.pending_command
+            || app.pending_leaves
+            || app.pending_casks
+            || app.pending_sizes
+            || app.pending_status
+        {
             ACTIVE_TICK_RATE
         } else {
             IDLE_TICK_RATE

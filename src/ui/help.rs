@@ -63,7 +63,7 @@ fn build_help_render_data(app: &App) -> HelpRenderData {
                     } else {
                         "l / ←".to_string()
                     },
-                    description: "Status tab prev",
+                    description: "Previous status tab",
                     key_event: plain_key_event(KeyCode::Char('l')),
                 },
                 HelpCommand {
@@ -72,7 +72,7 @@ fn build_help_render_data(app: &App) -> HelpRenderData {
                     } else {
                         "; / →".to_string()
                     },
-                    description: "Status tab next",
+                    description: "Next status tab",
                     key_event: plain_key_event(KeyCode::Char(';')),
                 },
             ],
@@ -129,6 +129,21 @@ fn build_help_render_data(app: &App) -> HelpRenderData {
                     key_label: "P".to_string(),
                     description: "Update Brewery via cargo (confirm)",
                     key_event: plain_key_event(KeyCode::Char('P')),
+                },
+                HelpCommand {
+                    key_label: "S".to_string(),
+                    description: "Start selected service (confirm)",
+                    key_event: plain_key_event(KeyCode::Char('S')),
+                },
+                HelpCommand {
+                    key_label: "X".to_string(),
+                    description: "Stop selected service (confirm)",
+                    key_event: plain_key_event(KeyCode::Char('X')),
+                },
+                HelpCommand {
+                    key_label: "R".to_string(),
+                    description: "Restart selected service (confirm)",
+                    key_event: plain_key_event(KeyCode::Char('R')),
                 },
                 HelpCommand {
                     key_label: "o".to_string(),

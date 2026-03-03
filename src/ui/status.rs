@@ -39,6 +39,8 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         ("Activity", StatusTab::Activity),
         ("Issues", StatusTab::Issues),
         ("Outdated", StatusTab::Outdated),
+        ("Services", StatusTab::Services),
+        ("History", StatusTab::History),
     ];
 
     let mut title_spans: Vec<Span> = Vec::new();
@@ -54,7 +56,7 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
             Style::default().fg(theme.text_muted)
         };
         title_spans.push(Span::styled(format!(" {} ", name), style));
-        if i < 2 {
+        if i + 1 < tabs.len() {
             title_spans.push(Span::styled(
                 symbol(app, "·", "|"),
                 Style::default().fg(theme.border),
@@ -79,6 +81,8 @@ fn build_tab_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine>
         StatusTab::Activity => build_activity_items(app, system_status),
         StatusTab::Issues => build_issues_items(app, system_status),
         StatusTab::Outdated => build_outdated_items(app, system_status),
+        StatusTab::Services => build_services_items(app, system_status),
+        StatusTab::History => build_history_items(app),
     }
 }
 
@@ -114,10 +118,92 @@ fn build_issues_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLi
         .collect()
 }
 
+fn build_services_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine> {
+    let theme = &app.theme;
+    if system_status.services.is_empty() {
+        return vec![(
+            format!("{} No Homebrew services found", symbol(app, "✓", "ok")),
+            theme.text_muted,
+        )];
+    }
+
+    let selected = app.services_selected_index.unwrap_or(0);
+    system_status
+        .services
+        .iter()
+        .enumerate()
+        .map(|(index, service)| {
+            let marker = if index == selected {
+                symbol(app, "▸", ">")
+            } else {
+                " "
+            };
+            let status_color = match service.status.as_str() {
+                "started" => theme.green,
+                "stopped" | "none" => theme.text_muted,
+                "error" => theme.red,
+                _ => theme.yellow,
+            };
+            (
+                format!("{marker} {} ({})", service.name, service.status),
+                status_color,
+            )
+        })
+        .collect()
+}
+
+fn build_history_items(app: &App) -> Vec<StatusLine> {
+    let theme = &app.theme;
+    if app.command_history.is_empty() {
+        return vec![(
+            format!("{} No commands yet", symbol(app, "ℹ", "i")),
+            theme.text_muted,
+        )];
+    }
+
+    app.command_history
+        .iter()
+        .map(|entry| {
+            let prefix = if entry.success {
+                symbol(app, "✓", "ok")
+            } else {
+                symbol(app, "✗", "x")
+            };
+            let color = if entry.success {
+                theme.green
+            } else {
+                theme.red
+            };
+            let exit_label = entry
+                .exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "n/a".to_string());
+            (
+                format!(
+                    "{prefix} [{}] {} (exit {exit_label}, {}s, {}s ago)",
+                    entry.kind,
+                    entry.command,
+                    entry.duration_secs,
+                    entry.finished_at.elapsed().as_secs()
+                ),
+                color,
+            )
+        })
+        .collect()
+}
+
 fn build_activity_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine> {
-    let mut items = build_pending_command_items(app)
-        .or_else(|| build_recent_completion_items(app))
-        .unwrap_or_default();
+    let mut items = Vec::new();
+
+    if let Some(command_items) = build_pending_command_items(app) {
+        items.extend(command_items);
+    }
+
+    items.extend(build_pending_request_items(app));
+
+    if items.is_empty() {
+        items = build_recent_completion_items(app).unwrap_or_default();
+    }
 
     if items.is_empty() {
         items = build_status_snapshot_items(app, system_status);
@@ -126,6 +212,58 @@ fn build_activity_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
     if !app.pending_command {
         prepend_toast_item(app, &mut items);
         append_last_command_error(app, &mut items);
+    }
+
+    items
+}
+
+fn build_pending_request_items(app: &App) -> Vec<StatusLine> {
+    let theme = &app.theme;
+    let spinner = spinner_frame(app);
+    let mut items = Vec::new();
+
+    if app.pending_leaves {
+        let elapsed = app
+            .pending_leaves_started_at
+            .map(|started| started.elapsed().as_secs())
+            .unwrap_or(0);
+        items.push((
+            format!("{spinner} Refreshing leaves ({elapsed}s)"),
+            theme.accent_secondary,
+        ));
+    }
+
+    if app.pending_casks {
+        let elapsed = app
+            .pending_casks_started_at
+            .map(|started| started.elapsed().as_secs())
+            .unwrap_or(0);
+        items.push((
+            format!("{spinner} Refreshing casks ({elapsed}s)"),
+            theme.accent_secondary,
+        ));
+    }
+
+    if app.pending_sizes {
+        let elapsed = app
+            .pending_sizes_started_at
+            .map(|started| started.elapsed().as_secs())
+            .unwrap_or(0);
+        items.push((
+            format!("{spinner} Refreshing sizes ({elapsed}s)"),
+            theme.accent_secondary,
+        ));
+    }
+
+    if app.pending_status {
+        let elapsed = app
+            .pending_status_started_at
+            .map(|started| started.elapsed().as_secs())
+            .unwrap_or(0);
+        items.push((
+            format!("{spinner} Refreshing status/outdated/services ({elapsed}s)"),
+            theme.accent_secondary,
+        ));
     }
 
     items
@@ -148,6 +286,9 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         Some(CommandKind::Uninstall) => "Uninstalling",
         Some(CommandKind::Upgrade) => "Upgrading",
         Some(CommandKind::UpgradeAll) => "Upgrading outdated packages",
+        Some(CommandKind::ServiceStart) => "Starting service",
+        Some(CommandKind::ServiceStop) => "Stopping service",
+        Some(CommandKind::ServiceRestart) => "Restarting service",
         Some(CommandKind::SelfUpdate) => "Updating Brewery",
         _ => "Running",
     };
@@ -162,27 +303,19 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         .unwrap_or_else(|| "0s".to_string());
 
     let mut items = vec![(format!("{label} ({elapsed})"), theme.accent)];
-    if let Some(target) = app.last_command_target.as_ref() {
-        let command = app
-            .last_command
-            .map(|kind| kind.label())
-            .unwrap_or("command");
-        let cask_flag = if app.last_command_target_is_cask {
-            " --cask"
+    if let Some(kind) = app.last_command {
+        let binary = if kind == CommandKind::SelfUpdate {
+            "cargo"
         } else {
-            ""
+            "brew"
         };
-        items.push((
-            format!("Command: brew {command}{cask_flag} {target}"),
-            theme.text_muted,
-        ));
-    } else if app.last_command == Some(CommandKind::UpgradeAll) {
-        items.push(("Command: brew upgrade".to_string(), theme.text_muted));
-    } else if app.last_command == Some(CommandKind::SelfUpdate) {
-        items.push((
-            "Command: cargo install brewery --locked --force".to_string(),
-            theme.text_muted,
-        ));
+        let args = app.last_command_args.join(" ");
+        let command_text = if args.is_empty() {
+            binary.to_string()
+        } else {
+            format!("{binary} {args}")
+        };
+        items.push((format!("Command: {command_text}"), theme.text_muted));
     }
     items.extend(
         app.last_command_output
@@ -204,6 +337,9 @@ fn build_recent_completion_items(app: &App) -> Option<Vec<StatusLine>> {
         CommandKind::Uninstall => "Uninstall",
         CommandKind::Upgrade => "Upgrade",
         CommandKind::UpgradeAll => "Upgrade all outdated",
+        CommandKind::ServiceStart => "Service start",
+        CommandKind::ServiceStop => "Service stop",
+        CommandKind::ServiceRestart => "Service restart",
         _ => "Command",
     };
     Some(vec![(format!("{verb} completed: {pkg}"), theme.green)])
@@ -254,6 +390,26 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         format!("Packages: {}", outdated_status.0),
         outdated_status.1,
     ));
+
+    if !system_status.services.is_empty() {
+        let running = system_status
+            .services
+            .iter()
+            .filter(|service| service.status == "started")
+            .count();
+        let color = if running > 0 {
+            theme.green
+        } else {
+            theme.text_muted
+        };
+        items.push((
+            format!(
+                "Services: {running}/{} running",
+                system_status.services.len()
+            ),
+            color,
+        ));
+    }
 
     if let Some(update_status) = system_status.brew_update_status.as_ref() {
         let color = match update_status.as_str() {

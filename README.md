@@ -24,10 +24,13 @@ _Browse, search, and manage your Homebrew packages with ease_
 - **🔍 Advanced Search** — Search all available Homebrew packages
 - **📊 Rich Details** — View descriptions, homepage, versions, dependencies, and reverse dependencies
 - **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
+- **🧰 Service Controls** — View Homebrew service states and run start/stop/restart from the Services tab
 - **📏 Size Analytics** — Leaderboard of installed packages by disk usage
 - **⚡ Quick Actions** — Install, uninstall, upgrade, upgrade all outdated, cleanup, autoremove, and export Brewfiles
 - **🔄 Self Update** — Detect new Brewery releases and update in-app via Cargo
 - **🎯 Outdated Workflow** — Toggle outdated-only leaves filter and batch-upgrade outdated packages
+- **🕘 Command History** — Browse recent command runs with exit status in Status -> History
+- **🔁 Background Refresh** — Periodically refresh status/outdated/services and show in-panel progress
 - **🎨 Adaptive Theming** — Auto-detects system theme with manual override (light/dark)
 - **🖥️ Pure Terminal** — No browser required, works entirely in your terminal
 
@@ -56,6 +59,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | `j`/`k` or `↑`/`↓` | Move selection             |
 | `Tab`/`Shift+Tab`  | Cycle focus between panels |
 | `Shift+C`          | Toggle formulae/casks list |
+| `l`/`;` or `←`/`→` | Cycle status tabs          |
 
 ### Search
 
@@ -88,6 +92,9 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | `c` | Cleanup old versions           |
 | `a` | Autoremove unused dependencies |
 | `b` | Export Brewfile (bundle dump)  |
+| `Shift+S` | Start selected service (Status -> Services, press twice to confirm) |
+| `Shift+X` | Stop selected service (Status -> Services, press twice to confirm) |
+| `Shift+R` | Restart selected service (Status -> Services, press twice to confirm) |
 
 ### View
 

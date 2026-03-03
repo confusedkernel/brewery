@@ -11,6 +11,7 @@ impl App {
         }
 
         self.pending_leaves = true;
+        self.pending_leaves_started_at = Some(Instant::now());
         set_request_status(self, "Loading leaves...", true);
 
         spawn_request(tx, async {
@@ -101,6 +102,7 @@ impl App {
         }
 
         self.pending_sizes = true;
+        self.pending_sizes_started_at = Some(Instant::now());
         set_request_status(self, "Loading sizes...", true);
 
         spawn_request(tx, async {
@@ -116,6 +118,7 @@ impl App {
         }
 
         self.pending_casks = true;
+        self.pending_casks_started_at = Some(Instant::now());
         set_request_status(self, "Loading casks...", true);
 
         spawn_request(tx, async {
@@ -131,6 +134,7 @@ impl App {
         }
 
         self.pending_status = true;
+        self.pending_status_started_at = Some(Instant::now());
         set_request_status(self, "Checking status...", true);
 
         spawn_request(tx, async {
@@ -152,13 +156,14 @@ impl App {
 
         self.pending_command = true;
         self.last_command = Some(kind);
-        self.last_command_target = if kind.is_package_action() {
+        self.last_command_target = if kind.has_named_target() {
             args.last().map(|value| (*value).to_string())
         } else {
             None
         };
         self.last_command_target_is_cask = kind.is_package_action() && args.contains(&"--cask");
         self.command_started_at = Some(Instant::now());
+        self.last_command_args = args.iter().map(|arg| (*arg).to_string()).collect();
         self.last_command_output.clear();
         self.last_command_error = None;
         self.status = format!("Running {kind}...");

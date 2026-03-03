@@ -26,6 +26,7 @@ impl App {
             }
         }
         self.pending_leaves = false;
+        self.pending_leaves_started_at = None;
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
     }
@@ -77,6 +78,7 @@ impl App {
         }
 
         self.pending_sizes = false;
+        self.pending_sizes_started_at = None;
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
     }
@@ -106,6 +108,7 @@ impl App {
             }
         }
         self.pending_casks = false;
+        self.pending_casks_started_at = None;
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
     }
@@ -115,6 +118,15 @@ impl App {
             Ok(status_snapshot) => {
                 self.outdated_leaves = status_snapshot.outdated_packages.iter().cloned().collect();
                 self.system_status = Some(status_snapshot);
+                if let Some(status) = self.system_status.as_ref() {
+                    if status.services.is_empty() {
+                        self.services_selected_index = None;
+                    } else {
+                        let current = self.services_selected_index.unwrap_or(0);
+                        self.services_selected_index =
+                            Some(current.min(status.services.len().saturating_sub(1)));
+                    }
+                }
                 self.update_filtered_leaves();
                 let max_scroll = self.max_status_scroll();
                 self.status_scroll_offset = self.status_scroll_offset.min(max_scroll);
@@ -125,16 +137,22 @@ impl App {
             Err(err) => {
                 self.last_error = Some(err.to_string());
                 self.status = "Status check failed".to_string();
+                self.last_status_check = Some(Instant::now());
             }
         }
 
         self.pending_status = false;
+        self.pending_status_started_at = None;
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
     }
 
     pub fn apply_command_message(&mut self, message: CommandMessage) {
         let mut toast: Option<(ToastLevel, String)> = None;
+        let command_duration_secs = self
+            .command_started_at
+            .map(|started| started.elapsed().as_secs())
+            .unwrap_or(0);
 
         match message.result {
             Ok(result) => {
@@ -152,12 +170,12 @@ impl App {
                 self.last_command_output = lines.into_iter().take(8).collect();
                 if result.success {
                     self.status = format!("{} complete", message.kind);
-                    if let Some(pkg) =
-                        package_action_target(message.kind, self.last_command_target.as_deref())
+                    if let Some(target) =
+                        action_target(message.kind, self.last_command_target.as_deref())
                     {
                         toast = Some((
                             ToastLevel::Success,
-                            format!("{} succeeded for {pkg}", message.kind.action_title()),
+                            format!("{} succeeded for {target}", message.kind.action_title()),
                         ));
                     } else if message.kind == CommandKind::UpgradeAll {
                         toast = Some((
@@ -175,15 +193,18 @@ impl App {
                     if !result.stderr.trim().is_empty() {
                         self.last_command_error = Some(result.stderr.trim().to_string());
                     }
-                    if let Some(pkg) =
-                        package_action_target(message.kind, self.last_command_target.as_deref())
+                    if let Some(target) =
+                        action_target(message.kind, self.last_command_target.as_deref())
                     {
                         let reason = first_nonempty_line(&result.stderr)
                             .or_else(|| first_nonempty_line(&result.stdout))
                             .unwrap_or("Unknown error");
                         toast = Some((
                             ToastLevel::Error,
-                            format!("{} failed for {pkg}: {reason}", message.kind.action_title()),
+                            format!(
+                                "{} failed for {target}: {reason}",
+                                message.kind.action_title()
+                            ),
                         ));
                     } else if message.kind == CommandKind::UpgradeAll {
                         let reason = first_nonempty_line(&result.stderr)
@@ -225,21 +246,32 @@ impl App {
                 }
 
                 if result.success
-                    && message.kind.is_package_action()
-                    && let Some(pkg) = self.last_command_target.clone()
+                    && message.kind.has_named_target()
+                    && let Some(target) = self.last_command_target.clone()
                 {
-                    self.last_command_completed = Some((message.kind, pkg, Instant::now()));
+                    self.last_command_completed = Some((message.kind, target, Instant::now()));
                 }
+
+                self.push_command_history(
+                    message.kind,
+                    result.success,
+                    result.exit_code,
+                    command_duration_secs,
+                );
             }
             Err(err) => {
                 self.last_command_error = Some(err.to_string());
                 self.status = format!("{} failed", message.kind);
-                if let Some(pkg) =
-                    package_action_target(message.kind, self.last_command_target.as_deref())
+                if let Some(target) =
+                    action_target(message.kind, self.last_command_target.as_deref())
                 {
                     toast = Some((
                         ToastLevel::Error,
-                        format!("{} failed for {pkg}: {}", message.kind.action_title(), err),
+                        format!(
+                            "{} failed for {target}: {}",
+                            message.kind.action_title(),
+                            err
+                        ),
                     ));
                 } else if message.kind == CommandKind::UpgradeAll {
                     toast = Some((
@@ -249,6 +281,8 @@ impl App {
                 } else if message.kind == CommandKind::SelfUpdate {
                     toast = Some((ToastLevel::Error, format!("Brewery update failed: {err}")));
                 }
+
+                self.push_command_history(message.kind, false, None, command_duration_secs);
             }
         }
 
@@ -258,6 +292,7 @@ impl App {
 
         self.pending_command = false;
         self.command_started_at = None;
+        self.last_command_args.clear();
         self.last_refresh = Instant::now();
         self.needs_redraw = true;
     }
@@ -268,6 +303,38 @@ impl App {
             message,
             created_at: Instant::now(),
         });
+    }
+
+    fn push_command_history(
+        &mut self,
+        kind: CommandKind,
+        success: bool,
+        exit_code: Option<i32>,
+        duration_secs: u64,
+    ) {
+        let binary = if kind == CommandKind::SelfUpdate {
+            "cargo"
+        } else {
+            "brew"
+        };
+        let args = self.last_command_args.join(" ");
+        let command = if args.is_empty() {
+            binary.to_string()
+        } else {
+            format!("{binary} {args}")
+        };
+        self.command_history.push_front(CommandHistoryEntry {
+            kind: kind.label().to_string(),
+            command,
+            success,
+            exit_code,
+            finished_at: Instant::now(),
+            duration_secs,
+        });
+
+        while self.command_history.len() > COMMAND_HISTORY_CAPACITY {
+            self.command_history.pop_back();
+        }
     }
 }
 
@@ -287,8 +354,8 @@ fn merge_details(existing: &mut Details, incoming: &Details) {
     }
 }
 
-fn package_action_target(kind: CommandKind, target: Option<&str>) -> Option<&str> {
-    if kind.is_package_action() {
+fn action_target(kind: CommandKind, target: Option<&str>) -> Option<&str> {
+    if kind.has_named_target() {
         return target;
     }
     None
