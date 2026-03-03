@@ -3,6 +3,7 @@ mod commands;
 mod details;
 mod leaves;
 mod process;
+mod services;
 mod size;
 mod status;
 
