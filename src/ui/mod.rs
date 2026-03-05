@@ -1,13 +1,14 @@
 mod details;
 mod footer;
 pub mod help;
+pub mod layout;
 mod leaves;
 mod search;
 mod sizes;
 mod status;
 mod util;
 
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
@@ -17,23 +18,15 @@ use crate::theme::ThemeMode;
 
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = &app.theme;
+    let app_layout = layout::split_app(frame.area());
 
     let bg_block = Block::default().style(Style::default().bg(theme.bg_main));
     frame.render_widget(bg_block, frame.area());
 
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .split(frame.area());
-
     let dimmed = app.show_help_popup;
-    draw_header(frame, layout[0], app, dimmed);
-    draw_body(frame, layout[1], app);
-    footer::draw_footer(frame, layout[2], app, dimmed);
+    draw_header(frame, app_layout.header, app, dimmed);
+    draw_body(frame, app, app_layout);
+    footer::draw_footer(frame, app_layout.footer, app, dimmed);
 
     if app.show_help_popup {
         help::draw_help_popup(frame, app);
@@ -95,48 +88,29 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App, dimmed: bool) 
     frame.render_widget(header, area);
 }
 
-fn draw_body(frame: &mut ratatui::Frame, area: Rect, app: &App) {
-    let columns = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-        .split(area);
-
-    let left_panels = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(10),
-            Constraint::Length(10),
-        ])
-        .split(columns[0]);
-
-    let right_panels = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(6), Constraint::Min(0)])
-        .split(columns[1]);
-
-    search::draw_search_panel(frame, left_panels[0], app);
+fn draw_body(frame: &mut ratatui::Frame, app: &App, layout: layout::AppLayout) {
+    search::draw_search_panel(frame, layout.search, app);
     leaves::draw_leaves_panel(
         frame,
-        left_panels[1],
+        layout.leaves,
         app,
         app.focus_panel == FocusedPanel::Leaves,
     );
     sizes::draw_sizes_panel(
         frame,
-        left_panels[2],
+        layout.sizes,
         app,
         app.focus_panel == FocusedPanel::Sizes,
     );
     status::draw_status_panel(
         frame,
-        right_panels[0],
+        layout.status,
         app,
         app.focus_panel == FocusedPanel::Status,
     );
     details::draw_details_panel(
         frame,
-        right_panels[1],
+        layout.details,
         app,
         app.focus_panel == FocusedPanel::Details,
     );

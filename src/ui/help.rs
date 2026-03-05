@@ -1,10 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
 
 use crate::app::App;
+use crate::ui::layout;
 use crate::ui::util::symbol;
 
 struct HelpCommand {
@@ -279,33 +279,22 @@ pub fn help_selected_command_key(app: &App) -> Option<KeyEvent> {
         .copied()
 }
 
+pub fn help_command_index_at_line(app: &App, line_index: usize) -> Option<usize> {
+    build_help_render_data(app)
+        .command_line_indices
+        .iter()
+        .position(|line| *line == line_index)
+}
+
 pub fn draw_help_popup(frame: &mut ratatui::Frame, app: &App) {
     let theme = &app.theme;
     let area = frame.area();
-
-    let body_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .split(area);
+    let app_layout = layout::split_app(area);
 
     let dim_overlay = Block::default().style(Style::default().bg(theme.bg_dim));
-    frame.render_widget(dim_overlay, body_area[1]);
+    frame.render_widget(dim_overlay, app_layout.body);
 
-    let popup_width = 50.min(area.width.saturating_sub(4));
-    let popup_height = 22.min(area.height.saturating_sub(4));
-    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = (area.height.saturating_sub(popup_height)) / 2;
-
-    let popup_area = Rect {
-        x: popup_x,
-        y: popup_y,
-        width: popup_width,
-        height: popup_height,
-    };
+    let popup_area = layout::help_popup_area(area);
 
     frame.render_widget(Clear, popup_area);
 

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Services tab in Status panel with `brew services` state rendering and selected-row controls
 - Service actions via `Shift+S` (start), `Shift+X` (stop), and `Shift+R` (restart), each with confirmation
 - History tab with lightweight command history (latest runs, elapsed duration, and exit status)
+- Mouse navigation for panel focus, list selection, status tab switching, and wheel scrolling
 
 ### Changed
 - Activity tab now shows progress lines for long-running data refresh tasks (leaves/casks/sizes/status)

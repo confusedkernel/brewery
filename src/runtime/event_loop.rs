@@ -5,11 +5,12 @@ use crossterm::event::{self, Event, KeyEventKind};
 use crossterm::terminal::size;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 
 use crate::app::App;
-use crate::runtime::input::handle_key_event;
+use crate::runtime::input::{handle_key_event, handle_mouse_event};
 use crate::runtime::messages::{create_channels, handle_auto_details, process_pending_messages};
-use crate::ui::{draw, help};
+use crate::ui::{draw, help, layout};
 
 /// Poll interval while spinner/progress is active.
 const ACTIVE_TICK_RATE: Duration = Duration::from_millis(80);
@@ -82,13 +83,21 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
             IDLE_TICK_RATE
         };
 
-        if event::poll(tick_rate)?
-            && let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
+        if event::poll(tick_rate)? {
             let max_offset = help_max_offset(&app);
-            if let Some(result) = handle_key_event(&mut app, key, &channels, max_offset) {
-                return result;
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    if let Some(result) = handle_key_event(&mut app, key, &channels, max_offset) {
+                        return result;
+                    }
+                }
+                Event::Mouse(mouse) => {
+                    handle_mouse_event(&mut app, mouse, max_offset);
+                }
+                Event::Resize(_, _) => {
+                    app.needs_redraw = true;
+                }
+                _ => {}
             }
         }
 
@@ -97,9 +106,8 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
 }
 
 fn help_max_offset(app: &App) -> usize {
-    let (_, rows) = size().unwrap_or((0, 0));
-    let popup_height = 22u16.min(rows.saturating_sub(4));
-    let visible_height = popup_height.saturating_sub(2) as usize;
+    let (cols, rows) = size().unwrap_or((0, 0));
+    let visible_height = layout::help_visible_line_capacity(Rect::new(0, 0, cols, rows));
     let total_lines = help::help_line_count(app);
     total_lines.saturating_sub(visible_height)
 }

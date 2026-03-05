@@ -31,6 +31,7 @@ _Browse, search, and manage your Homebrew packages with ease_
 - **🎯 Outdated Workflow** — Toggle outdated-only leaves filter and batch-upgrade outdated packages
 - **🕘 Command History** — Browse recent command runs with exit status in Status -> History
 - **🔁 Background Refresh** — Periodically refresh status/outdated/services and show in-panel progress
+- **🖱️ Mouse Navigation** — Click to focus/select and use scroll wheel to navigate panels
 - **🎨 Adaptive Theming** — Auto-detects system theme with manual override (light/dark)
 - **🖥️ Pure Terminal** — No browser required, works entirely in your terminal
 
@@ -60,6 +61,13 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | `Tab`/`Shift+Tab`  | Cycle focus between panels |
 | `Shift+C`          | Toggle formulae/casks list |
 | `l`/`;` or `←`/`→` | Cycle status tabs          |
+
+### Mouse
+
+| Input          | Action                                                  |
+| -------------- | ------------------------------------------------------- |
+| Left click     | Focus panel, select list item, or switch status tab    |
+| Scroll wheel   | Scroll/select within the panel under the cursor        |
 
 ### Search
 
