@@ -1,7 +1,8 @@
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind};
+use crossterm::execute;
 use crossterm::terminal::size;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -26,10 +27,13 @@ const DETAILS_DEBOUNCE: Duration = Duration::from_millis(300);
 /// Periodic background status refresh (doctor/outdated/services).
 const BACKGROUND_STATUS_REFRESH: Duration = Duration::from_secs(5 * 60);
 
-pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> anyhow::Result<()> {
-    let mut app = App::new();
+pub async fn run_app(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    mut app: App,
+) -> anyhow::Result<()> {
     let mut channels = create_channels();
     let mut last_uptime_second = app.started_at.elapsed().as_secs();
+    let mut mouse_capture_enabled = app.mouse_enabled;
 
     let mut last_fetched_leaf: Option<String> = None;
 
@@ -92,7 +96,9 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
                     }
                 }
                 Event::Mouse(mouse) => {
-                    handle_mouse_event(&mut app, mouse, max_offset);
+                    if app.mouse_enabled {
+                        handle_mouse_event(&mut app, mouse, max_offset);
+                    }
                 }
                 Event::Resize(_, _) => {
                     app.needs_redraw = true;
@@ -101,8 +107,29 @@ pub async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> a
             }
         }
 
+        sync_mouse_capture(terminal, &mut mouse_capture_enabled, app.mouse_enabled)?;
+
         app.on_tick();
     }
+}
+
+fn sync_mouse_capture(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    mouse_capture_enabled: &mut bool,
+    mouse_enabled: bool,
+) -> anyhow::Result<()> {
+    if *mouse_capture_enabled == mouse_enabled {
+        return Ok(());
+    }
+
+    if mouse_enabled {
+        execute!(terminal.backend_mut(), EnableMouseCapture)?;
+    } else {
+        execute!(terminal.backend_mut(), DisableMouseCapture)?;
+    }
+
+    *mouse_capture_enabled = mouse_enabled;
+    Ok(())
 }
 
 fn help_max_offset(app: &App) -> usize {

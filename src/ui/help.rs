@@ -181,6 +181,11 @@ fn build_help_render_data(app: &App) -> HelpRenderData {
                     key_event: plain_key_event(KeyCode::Char('t')),
                 },
                 HelpCommand {
+                    key_label: "m".to_string(),
+                    description: "Toggle mouse",
+                    key_event: plain_key_event(KeyCode::Char('m')),
+                },
+                HelpCommand {
                     key_label: "Alt+i".to_string(),
                     description: "Toggle icons",
                     key_event: KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT),

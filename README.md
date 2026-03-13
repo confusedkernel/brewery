@@ -51,6 +51,10 @@ cargo install brewery
 
 Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in-app.
 
+### Mouse
+
+Mouse support is enabled by default. Start with `BREWERY_MOUSE=0` to disable capture, or press `m` in-app to toggle it.
+
 ## Keyboard Shortcuts
 
 ### Navigation
@@ -110,6 +114,7 @@ Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in
 | ------- | ------------------------------ |
 | `v`     | Toggle details/results view    |
 | `t`     | Toggle theme (auto/light/dark) |
+| `m`     | Toggle mouse support           |
 | `Alt+i` | Toggle Nerd Font / ASCII icons |
 | `?`     | Show help                      |
 | `q`     | Quit                           |

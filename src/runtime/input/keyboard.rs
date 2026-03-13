@@ -156,6 +156,10 @@ fn handle_normal_mode_key(
             app.cycle_theme();
             None
         }
+        KeyCode::Char('m') => {
+            app.toggle_mouse();
+            None
+        }
         KeyCode::Char('s') => {
             app.request_sizes(&channels.sizes_tx);
             None

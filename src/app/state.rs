@@ -33,6 +33,7 @@ impl App {
             pending_sizes: false,
             icon_mode: IconMode::Auto,
             icons_ascii: detect_icon_ascii(),
+            mouse_enabled: detect_mouse_enabled(),
             pending_command: false,
             last_command: None,
             last_command_target: None,
@@ -154,6 +155,19 @@ impl App {
             IconMode::Auto => detect_icon_ascii(),
         };
         self.status = format!("Icons: {}", if self.icons_ascii { "ASCII" } else { "Nerd" });
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn toggle_mouse(&mut self) {
+        self.mouse_enabled = !self.mouse_enabled;
+        self.status = format!(
+            "Mouse: {}",
+            if self.mouse_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         self.last_refresh = Instant::now();
     }
 
@@ -379,4 +393,15 @@ fn detect_icon_ascii() -> bool {
         return true;
     }
     false
+}
+
+fn detect_mouse_enabled() -> bool {
+    if let Ok(value) = std::env::var("BREWERY_MOUSE") {
+        let value = value.trim();
+        if value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("off")
+        {
+            return false;
+        }
+    }
+    true
 }

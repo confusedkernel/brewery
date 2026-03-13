@@ -58,6 +58,7 @@ pub struct App {
     pub pending_sizes: bool,
     pub icon_mode: IconMode,
     pub icons_ascii: bool,
+    pub mouse_enabled: bool,
     pub pending_command: bool,
     pub last_command: Option<CommandKind>,
     pub last_command_target: Option<String>,
