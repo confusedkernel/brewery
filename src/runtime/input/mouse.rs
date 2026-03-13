@@ -310,10 +310,9 @@ fn select_status_row(app: &mut App, column: u16, row: u16, area: Rect) {
         return;
     }
 
-    let Some(status) = app.system_status.as_ref() else {
-        return;
-    };
-    if status.services.is_empty() {
+    let filtered = app.filtered_service_indices();
+    if filtered.is_empty() {
+        app.services_selected_index = None;
         return;
     }
 
@@ -330,8 +329,12 @@ fn select_status_row(app: &mut App, column: u16, row: u16, area: Rect) {
         line_index = line_index.saturating_sub(1);
     }
 
-    let service_index = app.status_scroll_offset + line_index;
-    if service_index < status.services.len() && app.services_selected_index != Some(service_index) {
+    let visible_index = app.status_scroll_offset + line_index;
+    let Some(&service_index) = filtered.get(visible_index) else {
+        return;
+    };
+
+    if app.services_selected_index != Some(service_index) {
         app.services_selected_index = Some(service_index);
     }
 }

@@ -29,6 +29,32 @@ pub enum ServiceAction {
     Restart,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ServiceKindFilter {
+    #[default]
+    All,
+    Formula,
+    Cask,
+}
+
+impl ServiceKindFilter {
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Formula,
+            Self::Formula => Self::Cask,
+            Self::Cask => Self::All,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Formula => "formula",
+            Self::Cask => "cask",
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PackageKind {
     Formula,

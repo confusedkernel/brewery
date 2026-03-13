@@ -25,6 +25,7 @@ _Browse, search, and manage your Homebrew packages with ease_
 - **📊 Rich Details** — View descriptions, homepage, versions, dependencies, and reverse dependencies
 - **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
 - **🧰 Service Controls** — View Homebrew service states and run start/stop/restart from the Services tab
+- **🩺 Service Inspector** — See state, exit code, backend type, filters, and troubleshooting hints in one screen
 - **📏 Size Analytics** — Leaderboard of installed packages by disk usage
 - **⚡ Quick Actions** — Install, uninstall, upgrade, upgrade all outdated, cleanup, autoremove, and export Brewfiles
 - **🔄 Self Update** — Detect new Brewery releases and update in-app via Cargo
@@ -107,6 +108,10 @@ Mouse support is enabled by default. Start with `BREWERY_MOUSE=0` to disable cap
 | `Shift+S` | Start selected service (Status -> Services, press twice to confirm) |
 | `Shift+X` | Stop selected service (Status -> Services, press twice to confirm) |
 | `Shift+R` | Restart selected service (Status -> Services, press twice to confirm) |
+| `Shift+I` | Show selected service info (`brew services info`) |
+| `Shift+F` | Toggle failed-only services filter |
+| `Shift+A` | Toggle auto-start-only services filter |
+| `Shift+K` | Cycle services backend filter (all/formula/cask) |
 
 ### View
 

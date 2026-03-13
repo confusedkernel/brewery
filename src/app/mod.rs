@@ -6,8 +6,8 @@ mod types;
 
 pub use types::{
     CommandHistoryEntry, FocusedPanel, IconMode, InputMode, PackageAction, PackageKind,
-    PendingPackageAction, PendingServiceAction, ServiceAction, StatusTab, Toast, ToastLevel,
-    ViewMode,
+    PendingPackageAction, PendingServiceAction, ServiceAction, ServiceKindFilter, StatusTab, Toast,
+    ToastLevel, ViewMode,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -92,6 +92,9 @@ pub struct App {
     pub last_status_check: Option<Instant>,
     pub status_tab: StatusTab,
     pub services_selected_index: Option<usize>,
+    pub services_failed_only: bool,
+    pub services_autostart_only: bool,
+    pub services_kind_filter: ServiceKindFilter,
     pub leaves_outdated_only: bool,
     pub show_help_popup: bool,
     pub help_scroll_offset: usize,

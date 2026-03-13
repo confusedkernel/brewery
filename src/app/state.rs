@@ -67,6 +67,9 @@ impl App {
             last_status_check: None,
             status_tab: StatusTab::default(),
             services_selected_index: None,
+            services_failed_only: false,
+            services_autostart_only: false,
+            services_kind_filter: ServiceKindFilter::default(),
             leaves_outdated_only: false,
             show_help_popup: false,
             help_scroll_offset: 0,
@@ -246,18 +249,7 @@ impl App {
             }
             FocusedPanel::Status => {
                 if self.status_tab == StatusTab::Services {
-                    let services_len = self
-                        .system_status
-                        .as_ref()
-                        .map_or(0, |snapshot| snapshot.services.len());
-                    if services_len == 0 {
-                        self.services_selected_index = None;
-                        self.status_scroll_offset = 0;
-                        return;
-                    }
-                    let next = self.services_selected_index.unwrap_or(0).saturating_sub(1);
-                    self.services_selected_index = Some(next);
-                    self.status_scroll_offset = next;
+                    self.select_prev_service();
                 } else {
                     self.status_scroll_offset = self.status_scroll_offset.saturating_sub(1);
                 }
@@ -277,22 +269,7 @@ impl App {
             }
             FocusedPanel::Status => {
                 if self.status_tab == StatusTab::Services {
-                    let services_len = self
-                        .system_status
-                        .as_ref()
-                        .map_or(0, |snapshot| snapshot.services.len());
-                    if services_len == 0 {
-                        self.services_selected_index = None;
-                        self.status_scroll_offset = 0;
-                        return;
-                    }
-                    let max_index = self
-                        .system_status
-                        .as_ref()
-                        .map_or(0, |s| s.services.len().saturating_sub(1));
-                    let next = (self.services_selected_index.unwrap_or(0) + 1).min(max_index);
-                    self.services_selected_index = Some(next);
-                    self.status_scroll_offset = next;
+                    self.select_next_service();
                 } else {
                     let max_scroll = self.max_status_scroll();
                     self.status_scroll_offset = (self.status_scroll_offset + 1).min(max_scroll);
@@ -309,7 +286,7 @@ impl App {
             let count = match self.status_tab {
                 StatusTab::Outdated => h.outdated_packages.len(),
                 StatusTab::Issues => h.doctor_issues.len(),
-                StatusTab::Services => h.services.len(),
+                StatusTab::Services => self.filtered_service_count(),
                 StatusTab::History => self.command_history.len(),
                 StatusTab::Activity => self.activity_item_count(),
             };

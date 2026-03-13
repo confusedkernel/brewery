@@ -341,6 +341,43 @@ fn handle_normal_mode_key(
             }
             None
         }
+        KeyCode::Char('I') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                let Some(service) = app.selected_service().map(str::to_string) else {
+                    set_status(app, "No service selected");
+                    return None;
+                };
+                clear_pending_confirmations(app);
+                app.request_command(
+                    CommandKind::ServiceInfo,
+                    &["services", "info", &service],
+                    &channels.command_tx,
+                );
+                set_status(app, format!("Loading service info for {service}..."));
+            }
+            None
+        }
+        KeyCode::Char('F') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                clear_pending_confirmations(app);
+                app.toggle_services_failed_filter();
+            }
+            None
+        }
+        KeyCode::Char('A') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                clear_pending_confirmations(app);
+                app.toggle_services_autostart_filter();
+            }
+            None
+        }
+        KeyCode::Char('K') => {
+            if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Services {
+                clear_pending_confirmations(app);
+                app.cycle_services_kind_filter();
+            }
+            None
+        }
         KeyCode::Char('P') => {
             if app.pending_self_update {
                 app.request_command(

@@ -146,6 +146,26 @@ fn build_help_render_data(app: &App) -> HelpRenderData {
                     key_event: plain_key_event(KeyCode::Char('R')),
                 },
                 HelpCommand {
+                    key_label: "I".to_string(),
+                    description: "Show selected service info",
+                    key_event: plain_key_event(KeyCode::Char('I')),
+                },
+                HelpCommand {
+                    key_label: "F".to_string(),
+                    description: "Filter failed services",
+                    key_event: plain_key_event(KeyCode::Char('F')),
+                },
+                HelpCommand {
+                    key_label: "A".to_string(),
+                    description: "Filter auto-start services",
+                    key_event: plain_key_event(KeyCode::Char('A')),
+                },
+                HelpCommand {
+                    key_label: "K".to_string(),
+                    description: "Cycle service kind filter",
+                    key_event: plain_key_event(KeyCode::Char('K')),
+                },
+                HelpCommand {
                     key_label: "o".to_string(),
                     description: "Toggle outdated-only formula filter",
                     key_event: plain_key_event(KeyCode::Char('o')),

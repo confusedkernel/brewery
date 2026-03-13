@@ -10,6 +10,7 @@ pub enum CommandKind {
     ServiceStart,
     ServiceStop,
     ServiceRestart,
+    ServiceInfo,
     SelfUpdate,
     Cleanup,
     Autoremove,
@@ -27,6 +28,7 @@ impl CommandKind {
             Self::ServiceStart => "services start",
             Self::ServiceStop => "services stop",
             Self::ServiceRestart => "services restart",
+            Self::ServiceInfo => "services info",
             Self::SelfUpdate => "self-update",
             Self::Cleanup => "cleanup",
             Self::Autoremove => "autoremove",
@@ -46,7 +48,7 @@ impl CommandKind {
     }
 
     pub fn has_named_target(self) -> bool {
-        self.is_package_action() || self.is_service_action()
+        self.is_package_action() || self.is_service_action() || matches!(self, Self::ServiceInfo)
     }
 
     pub fn is_activity_command(self) -> bool {
@@ -59,6 +61,7 @@ impl CommandKind {
                 | Self::ServiceStart
                 | Self::ServiceStop
                 | Self::ServiceRestart
+                | Self::ServiceInfo
                 | Self::SelfUpdate
         )
     }
@@ -87,6 +90,7 @@ impl CommandKind {
             Self::ServiceStart => "Start service",
             Self::ServiceStop => "Stop service",
             Self::ServiceRestart => "Restart service",
+            Self::ServiceInfo => "Service info",
             _ => "Action",
         }
     }
@@ -151,6 +155,7 @@ mod tests {
         assert!(!CommandKind::SelfUpdate.refreshes_lists_on_success());
         assert!(!CommandKind::BundleDump.refreshes_lists_on_success());
         assert!(!CommandKind::ServiceStart.refreshes_lists_on_success());
+        assert!(!CommandKind::ServiceInfo.refreshes_lists_on_success());
     }
 
     #[test]

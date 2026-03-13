@@ -169,28 +169,46 @@ fn build_services_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
         )];
     }
 
-    let selected = app.services_selected_index.unwrap_or(0);
-    system_status
-        .services
+    let filtered_indices = app.filtered_service_indices();
+    if filtered_indices.is_empty() {
+        return vec![(
+            format!(
+                "{} No services match filters ({})",
+                symbol(app, "i", "i"),
+                app.services_filter_summary()
+            ),
+            theme.text_muted,
+        )];
+    }
+
+    filtered_indices
         .iter()
         .enumerate()
-        .map(|(index, service)| {
-            let marker = if index == selected {
+        .map(|(_, service_index)| {
+            let service = &system_status.services[*service_index];
+            let marker = if app.services_selected_index == Some(*service_index) {
                 symbol(app, "▸", ">")
             } else {
                 " "
             };
-            let is_active = is_active_service_status(&service.status);
-            let status_label = if is_active { "active" } else { "inactive" };
-            let status_color = if service.status == "error" {
+            let status_color = if service.has_failed() {
                 theme.red
-            } else if is_active {
+            } else if service.is_running() {
                 theme.green
             } else {
                 theme.text_muted
             };
+            let backend = app.service_backend_label(&service.name);
+            let exit_label = service
+                .exit_code
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "-".to_string());
             (
-                format!("{marker} {} ({status_label})", service.name),
+                format!(
+                    "{marker} {} ({}, exit {exit_label}, {backend})",
+                    service.name,
+                    service.state_label(),
+                ),
                 status_color,
             )
         })
@@ -334,6 +352,7 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         Some(CommandKind::ServiceStart) => "Starting service",
         Some(CommandKind::ServiceStop) => "Stopping service",
         Some(CommandKind::ServiceRestart) => "Restarting service",
+        Some(CommandKind::ServiceInfo) => "Loading service info",
         Some(CommandKind::SelfUpdate) => "Updating Brewery",
         _ => "Running",
     };
@@ -440,7 +459,7 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         let running = system_status
             .services
             .iter()
-            .filter(|service| is_active_service_status(&service.status))
+            .filter(|service| service.is_running())
             .count();
         let color = if running > 0 {
             theme.green
@@ -449,7 +468,7 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         };
         items.push((
             format!(
-                "Services: {running}/{} active",
+                "Services: {running}/{} running",
                 system_status.services.len()
             ),
             color,
@@ -590,10 +609,6 @@ fn format_elapsed(secs: u64) -> String {
         return format!("{}h", secs / 3600);
     }
     format!("{}d", secs / 86_400)
-}
-
-fn is_active_service_status(status: &str) -> bool {
-    status == "started"
 }
 
 fn text_width(value: &str) -> u16 {

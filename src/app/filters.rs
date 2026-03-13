@@ -1,4 +1,5 @@
 use super::*;
+use crate::brew::ServiceEntry;
 
 impl App {
     pub fn is_cask_mode(&self) -> bool {
@@ -51,12 +52,111 @@ impl App {
     }
 
     pub fn selected_service(&self) -> Option<&str> {
+        self.selected_service_entry()
+            .map(|service| service.name.as_str())
+    }
+
+    pub fn selected_service_entry(&self) -> Option<&ServiceEntry> {
         let selected = self.services_selected_index?;
         let snapshot = self.system_status.as_ref()?;
+        snapshot.services.get(selected)
+    }
+
+    pub fn filtered_service_indices(&self) -> Vec<usize> {
+        let Some(snapshot) = self.system_status.as_ref() else {
+            return Vec::new();
+        };
+
         snapshot
             .services
-            .get(selected)
-            .map(|service| service.name.as_str())
+            .iter()
+            .enumerate()
+            .filter(|(_, service)| self.service_matches_filters(service))
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    pub fn filtered_service_count(&self) -> usize {
+        self.filtered_service_indices().len()
+    }
+
+    pub fn select_next_service(&mut self) {
+        self.step_service_selection(StepDirection::Next);
+    }
+
+    pub fn select_prev_service(&mut self) {
+        self.step_service_selection(StepDirection::Prev);
+    }
+
+    pub fn reconcile_service_selection(&mut self) {
+        let filtered = self.filtered_service_indices();
+        if filtered.is_empty() {
+            self.services_selected_index = None;
+            self.status_scroll_offset = 0;
+            return;
+        }
+
+        if let Some(selected) = self.services_selected_index
+            && let Some(position) = filtered.iter().position(|candidate| *candidate == selected)
+        {
+            self.status_scroll_offset = position;
+            return;
+        }
+
+        self.services_selected_index = filtered.first().copied();
+        self.status_scroll_offset = 0;
+    }
+
+    pub fn toggle_services_failed_filter(&mut self) {
+        self.services_failed_only = !self.services_failed_only;
+        self.reconcile_service_selection();
+        self.status = format!("Services filter: {}", self.services_filter_summary());
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn toggle_services_autostart_filter(&mut self) {
+        self.services_autostart_only = !self.services_autostart_only;
+        self.reconcile_service_selection();
+        self.status = format!("Services filter: {}", self.services_filter_summary());
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn cycle_services_kind_filter(&mut self) {
+        self.services_kind_filter = self.services_kind_filter.next();
+        self.reconcile_service_selection();
+        self.status = format!("Services filter: {}", self.services_filter_summary());
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn services_filter_summary(&self) -> String {
+        let failed = if self.services_failed_only {
+            "failed"
+        } else {
+            "all"
+        };
+        let autostart = if self.services_autostart_only {
+            "auto-start"
+        } else {
+            "any start mode"
+        };
+        format!(
+            "{failed}, {autostart}, {}",
+            self.services_kind_filter.label()
+        )
+    }
+
+    pub fn is_service_cask_backed(&self, service_name: &str) -> bool {
+        self.casks
+            .binary_search_by(|candidate| candidate.as_str().cmp(service_name))
+            .is_ok()
+    }
+
+    pub fn service_backend_label(&self, service_name: &str) -> &'static str {
+        if self.is_service_cask_backed(service_name) {
+            "cask"
+        } else {
+            "formula"
+        }
     }
 
     pub fn select_next_result(&mut self) {
@@ -162,6 +262,38 @@ impl App {
     pub fn update_filtered_casks(&mut self) {
         self.filtered_casks = build_filtered_indices(&self.casks, &self.leaves_query, |_| true);
         reconcile_selection(&self.filtered_casks, &mut self.selected_cask_index);
+    }
+
+    fn step_service_selection(&mut self, direction: StepDirection) {
+        let filtered = self.filtered_service_indices();
+        if filtered.is_empty() {
+            self.services_selected_index = None;
+            self.status_scroll_offset = 0;
+            return;
+        }
+
+        let current_pos = self
+            .services_selected_index
+            .and_then(|selected| filtered.iter().position(|candidate| *candidate == selected));
+        let next_pos = step_position(current_pos, filtered.len(), direction);
+        self.services_selected_index = filtered.get(next_pos).copied();
+        self.status_scroll_offset = next_pos;
+    }
+
+    fn service_matches_filters(&self, service: &ServiceEntry) -> bool {
+        if self.services_failed_only && !service.has_failed() {
+            return false;
+        }
+
+        if self.services_autostart_only && !service.auto_start_enabled() {
+            return false;
+        }
+
+        match self.services_kind_filter {
+            ServiceKindFilter::All => true,
+            ServiceKindFilter::Formula => !self.is_service_cask_backed(&service.name),
+            ServiceKindFilter::Cask => self.is_service_cask_backed(&service.name),
+        }
     }
 }
 

@@ -5,11 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.1] - Unreleased
+## [0.5.0] - 2026-03-13
 
 ### Added
 - Services tab in Status panel with `brew services` state rendering and selected-row controls
 - Service actions via `Shift+S` (start), `Shift+X` (stop), and `Shift+R` (restart), each with confirmation
+- Service info action via `Shift+I` to run `brew services info <service>`
+- Services filters via `Shift+F` (failed), `Shift+A` (auto-start), and `Shift+K` (all/formula/cask)
+- Service inspector details pane with "Why is this red?" troubleshooting commands
 - History tab with lightweight command history (latest runs, elapsed duration, and exit status)
 - Mouse navigation for panel focus, list selection, status tab switching, and wheel scrolling
 - Mouse support toggle via `m`, with startup default controlled by `BREWERY_MOUSE=0`
@@ -18,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Activity tab now shows progress lines for long-running data refresh tasks (leaves/casks/sizes/status)
 - Command activity now surfaces the exact command line while a command is running
 - Status checks now run in the background every 5 minutes to keep health/outdated/service data fresh
-- Services tab now labels each service as active/inactive for quicker scanning
+- Services tab now shows running/stopped/error state, backend type, and last exit code
 
 ## [0.4.0] - 2026-02-22
 

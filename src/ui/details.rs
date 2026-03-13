@@ -3,7 +3,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, InputMode, ViewMode};
+use crate::app::{App, InputMode, StatusTab, ViewMode};
 use crate::ui::util::{format_size, symbol};
 
 pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
@@ -14,6 +14,8 @@ pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_
         InputMode::PackageSearch | InputMode::PackageResults
     ) {
         build_details_lines(app, app.selected_package_result())
+    } else if app.status_tab == StatusTab::Services {
+        build_service_details_lines(app)
     } else {
         match app.view_mode {
             ViewMode::Details => build_details_lines(app, app.selected_package_name()),
@@ -261,6 +263,159 @@ fn build_package_results(app: &App) -> Vec<Line<'static>> {
     for item in app.package_results.iter().take(16) {
         lines.push(Line::from(Span::styled(
             format!("  {} {}", symbol(app, "•", "*"), item),
+            Style::default().fg(theme.text_primary),
+        )));
+    }
+
+    lines
+}
+
+fn build_service_details_lines(app: &App) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Service Inspector".to_string(),
+            Style::default()
+                .fg(theme.accent_secondary)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  Filters: {}", app.services_filter_summary()),
+            Style::default().fg(theme.text_muted),
+        )),
+        Line::from(Span::styled(
+            "  Actions: [S] start  [X] stop  [R] restart  [I] info".to_string(),
+            Style::default().fg(theme.text_secondary),
+        )),
+        Line::from(Span::styled(
+            "  Filter keys: [F] failed-only  [A] auto-start-only  [K] kind".to_string(),
+            Style::default().fg(theme.text_secondary),
+        )),
+    ];
+
+    let Some(service) = app.selected_service_entry() else {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  No service selected".to_string(),
+            Style::default().fg(theme.text_muted),
+        )));
+        return lines;
+    };
+
+    let state_color = if service.has_failed() {
+        theme.red
+    } else if service.is_running() {
+        theme.green
+    } else {
+        theme.text_muted
+    };
+    let exit_code = service
+        .exit_code
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "n/a".to_string());
+    let exit_color = if service.exit_code.is_some_and(|value| value != 0) {
+        theme.red
+    } else {
+        theme.text_secondary
+    };
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        format!("  {}", service.name),
+        Style::default()
+            .fg(theme.accent)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  State: {}", service.state_label()),
+        Style::default().fg(state_color),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  Raw status: {}", service.status),
+        Style::default().fg(theme.text_secondary),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  Last exit code: {exit_code}"),
+        Style::default().fg(exit_color),
+    )));
+
+    let user_label = service.user.as_deref().unwrap_or("n/a");
+    lines.push(Line::from(Span::styled(
+        format!("  User: {user_label}"),
+        Style::default().fg(theme.text_secondary),
+    )));
+    lines.push(Line::from(Span::styled(
+        format!("  Backend: {}", app.service_backend_label(&service.name)),
+        Style::default().fg(theme.text_secondary),
+    )));
+
+    let autostart = if service.auto_start_enabled() {
+        "yes"
+    } else {
+        "no"
+    };
+    lines.push(Line::from(Span::styled(
+        format!("  Auto-start: {autostart}"),
+        Style::default().fg(theme.text_secondary),
+    )));
+
+    if let Some(file) = service.file.as_deref() {
+        lines.push(Line::from(Span::styled(
+            format!("  Unit file: {file}"),
+            Style::default().fg(theme.text_muted),
+        )));
+    }
+
+    if service.has_failed() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("  {} Why is this red?", symbol(app, "⚠", "!")),
+            Style::default().fg(theme.red).add_modifier(Modifier::BOLD),
+        )));
+        lines.extend(platform_service_hints(app, &service.name));
+    }
+
+    lines
+}
+
+fn platform_service_hints(app: &App, service: &str) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    let mut lines = Vec::new();
+
+    if cfg!(target_os = "macos") {
+        lines.push(Line::from(Span::styled(
+            format!("    {} brew services info {service}", symbol(app, "•", "*")),
+            Style::default().fg(theme.text_primary),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    {} launchctl print gui/$UID/homebrew.mxcl.{service}",
+                symbol(app, "•", "*")
+            ),
+            Style::default().fg(theme.text_primary),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    {} log show --style compact --predicate 'process CONTAINS \"{service}\"' --last 10m",
+                symbol(app, "•", "*")
+            ),
+            Style::default().fg(theme.text_primary),
+        )));
+    } else {
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    {} systemctl --user status {service}.service",
+                symbol(app, "•", "*")
+            ),
+            Style::default().fg(theme.text_primary),
+        )));
+        lines.push(Line::from(Span::styled(
+            format!(
+                "    {} journalctl --user-unit {service}.service -n 50 --no-pager",
+                symbol(app, "•", "*")
+            ),
             Style::default().fg(theme.text_primary),
         )));
     }

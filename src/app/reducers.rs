@@ -99,6 +99,7 @@ impl App {
                     self.selected_cask_index = Some(0);
                 }
                 self.last_casks_refresh = Some(Instant::now());
+                self.reconcile_service_selection();
                 self.last_error = None;
                 self.status = "Casks updated".to_string();
             }
@@ -118,15 +119,7 @@ impl App {
             Ok(status_snapshot) => {
                 self.outdated_leaves = status_snapshot.outdated_packages.iter().cloned().collect();
                 self.system_status = Some(status_snapshot);
-                if let Some(status) = self.system_status.as_ref() {
-                    if status.services.is_empty() {
-                        self.services_selected_index = None;
-                    } else {
-                        let current = self.services_selected_index.unwrap_or(0);
-                        self.services_selected_index =
-                            Some(current.min(status.services.len().saturating_sub(1)));
-                    }
-                }
+                self.reconcile_service_selection();
                 self.update_filtered_leaves();
                 let max_scroll = self.max_status_scroll();
                 self.status_scroll_offset = self.status_scroll_offset.min(max_scroll);
