@@ -180,14 +180,17 @@ fn build_services_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
             } else {
                 " "
             };
-            let status_color = match service.status.as_str() {
-                "started" => theme.green,
-                "stopped" | "none" => theme.text_muted,
-                "error" => theme.red,
-                _ => theme.yellow,
+            let is_active = is_active_service_status(&service.status);
+            let status_label = if is_active { "active" } else { "inactive" };
+            let status_color = if service.status == "error" {
+                theme.red
+            } else if is_active {
+                theme.green
+            } else {
+                theme.text_muted
             };
             (
-                format!("{marker} {} ({})", service.name, service.status),
+                format!("{marker} {} ({status_label})", service.name),
                 status_color,
             )
         })
@@ -437,7 +440,7 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         let running = system_status
             .services
             .iter()
-            .filter(|service| service.status == "started")
+            .filter(|service| is_active_service_status(&service.status))
             .count();
         let color = if running > 0 {
             theme.green
@@ -446,7 +449,7 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         };
         items.push((
             format!(
-                "Services: {running}/{} running",
+                "Services: {running}/{} active",
                 system_status.services.len()
             ),
             color,
@@ -587,6 +590,10 @@ fn format_elapsed(secs: u64) -> String {
         return format!("{}h", secs / 3600);
     }
     format!("{}d", secs / 86_400)
+}
+
+fn is_active_service_status(status: &str) -> bool {
+    status == "started"
 }
 
 fn text_width(value: &str) -> u16 {

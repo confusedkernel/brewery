@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Activity tab now shows progress lines for long-running data refresh tasks (leaves/casks/sizes/status)
 - Command activity now surfaces the exact command line while a command is running
 - Status checks now run in the background every 5 minutes to keep health/outdated/service data fresh
+- Services tab now labels each service as active/inactive for quicker scanning
 
 ## [0.4.0] - 2026-02-22
 
