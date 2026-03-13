@@ -9,6 +9,56 @@ use crate::ui::util::symbol;
 
 type StatusLine = (String, Color);
 
+const STATUS_TABS: [(&str, StatusTab); 5] = [
+    ("Activity", StatusTab::Activity),
+    ("Issues", StatusTab::Issues),
+    ("Outdated", StatusTab::Outdated),
+    ("Services", StatusTab::Services),
+    ("History", StatusTab::History),
+];
+
+pub fn tab_at_column(app: &App, area: Rect, column: u16) -> Option<StatusTab> {
+    if area.width <= 2 {
+        return None;
+    }
+
+    let inner_left = area.x.saturating_add(1);
+    let inner_right = area.x.saturating_add(area.width.saturating_sub(2));
+    if column < inner_left || column > inner_right {
+        return None;
+    }
+
+    let separator = symbol(app, "·", "|");
+    let separator_width = text_width(separator);
+    let mut cursor = inner_left;
+
+    for (index, (name, tab)) in STATUS_TABS.iter().enumerate() {
+        let label = format!(" {} ", name);
+        let tab_width = text_width(&label);
+        let tab_end = cursor.saturating_add(tab_width.saturating_sub(1));
+
+        if column >= cursor && column <= tab_end {
+            return Some(*tab);
+        }
+
+        cursor = cursor.saturating_add(tab_width);
+
+        if index + 1 < STATUS_TABS.len() {
+            let separator_end = cursor.saturating_add(separator_width.saturating_sub(1));
+            if column >= cursor && column <= separator_end {
+                return None;
+            }
+            cursor = cursor.saturating_add(separator_width);
+        }
+
+        if cursor > inner_right {
+            break;
+        }
+    }
+
+    None
+}
+
 pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
     let mut lines = Vec::new();
@@ -35,16 +85,8 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
     } else {
         theme.border
     };
-    let tabs = [
-        ("Activity", StatusTab::Activity),
-        ("Issues", StatusTab::Issues),
-        ("Outdated", StatusTab::Outdated),
-        ("Services", StatusTab::Services),
-        ("History", StatusTab::History),
-    ];
-
     let mut title_spans: Vec<Span> = Vec::new();
-    for (i, (name, tab)) in tabs.iter().enumerate() {
+    for (i, (name, tab)) in STATUS_TABS.iter().enumerate() {
         let style = if *tab == app.status_tab {
             let modifier = if is_focused {
                 Modifier::BOLD
@@ -56,7 +98,7 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
             Style::default().fg(theme.text_muted)
         };
         title_spans.push(Span::styled(format!(" {} ", name), style));
-        if i + 1 < tabs.len() {
+        if i + 1 < STATUS_TABS.len() {
             title_spans.push(Span::styled(
                 symbol(app, "·", "|"),
                 Style::default().fg(theme.border),
@@ -545,4 +587,37 @@ fn format_elapsed(secs: u64) -> String {
         return format!("{}h", secs / 3600);
     }
     format!("{}d", secs / 86_400)
+}
+
+fn text_width(value: &str) -> u16 {
+    value.chars().count() as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::Rect;
+
+    use super::tab_at_column;
+    use crate::app::{App, StatusTab};
+
+    #[test]
+    fn maps_clicks_to_expected_tabs() {
+        let app = App::new();
+        let area = Rect::new(0, 0, 70, 6);
+
+        assert_eq!(tab_at_column(&app, area, 2), Some(StatusTab::Activity));
+        assert_eq!(tab_at_column(&app, area, 13), Some(StatusTab::Issues));
+        assert_eq!(tab_at_column(&app, area, 22), Some(StatusTab::Outdated));
+        assert_eq!(tab_at_column(&app, area, 33), Some(StatusTab::Services));
+        assert_eq!(tab_at_column(&app, area, 44), Some(StatusTab::History));
+    }
+
+    #[test]
+    fn ignores_separator_clicks() {
+        let app = App::new();
+        let area = Rect::new(0, 0, 70, 6);
+
+        assert_eq!(tab_at_column(&app, area, 11), None);
+        assert_eq!(tab_at_column(&app, area, 20), None);
+    }
 }

@@ -13,8 +13,12 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::app::{App, FocusedPanel};
+use crate::app::{App, FocusedPanel, StatusTab};
 use crate::theme::ThemeMode;
+
+pub fn status_tab_at_column(app: &App, area: Rect, column: u16) -> Option<StatusTab> {
+    status::tab_at_column(app, area, column)
+}
 
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = &app.theme;

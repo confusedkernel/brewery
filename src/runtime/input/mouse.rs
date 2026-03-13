@@ -5,7 +5,7 @@ use crossterm::terminal::size;
 use ratatui::layout::Rect;
 
 use crate::app::{App, FocusedPanel, InputMode, StatusTab};
-use crate::ui::{help, layout};
+use crate::ui::{help, layout, status_tab_at_column};
 
 #[derive(Clone, Copy)]
 enum ScrollDirection {
@@ -297,28 +297,9 @@ fn select_installed_row(app: &mut App, row_index: usize, visible_height: usize, 
 }
 
 fn select_status_tab(app: &mut App, column: u16, area: Rect) {
-    let right_border = area.x.saturating_add(area.width.saturating_sub(1));
-    if area.width <= 2 || column <= area.x || column >= right_border {
-        return;
-    }
-
-    let tabs = [
-        StatusTab::Activity,
-        StatusTab::Issues,
-        StatusTab::Outdated,
-        StatusTab::Services,
-        StatusTab::History,
-    ];
-
-    let relative_x = column.saturating_sub(area.x + 1) as usize;
-    let inner_width = area.width.saturating_sub(2) as usize;
-    if inner_width == 0 {
-        return;
-    }
-
-    let tab_index = (relative_x * tabs.len() / inner_width).min(tabs.len().saturating_sub(1));
-    let next_tab = tabs[tab_index];
-    if app.status_tab != next_tab {
+    if let Some(next_tab) = status_tab_at_column(app, area, column)
+        && app.status_tab != next_tab
+    {
         app.status_tab = next_tab;
         app.status_scroll_offset = 0;
     }
