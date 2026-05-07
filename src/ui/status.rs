@@ -183,8 +183,7 @@ fn build_services_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
 
     filtered_indices
         .iter()
-        .enumerate()
-        .map(|(_, service_index)| {
+        .map(|service_index| {
             let service = &system_status.services[*service_index];
             let marker = if app.services_selected_index == Some(*service_index) {
                 symbol(app, "▸", ">")
