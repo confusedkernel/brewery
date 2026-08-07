@@ -12,19 +12,17 @@ impl App {
 
     pub fn toggle_outdated_filter(&mut self) {
         if self.is_cask_mode() {
-            self.status = "Outdated filter only applies to formulae".to_string();
-            self.last_refresh = Instant::now();
+            self.set_status("Outdated filter only applies to formulae");
             return;
         }
 
         self.leaves_outdated_only = !self.leaves_outdated_only;
         self.update_filtered_leaves();
-        if self.leaves_outdated_only {
-            self.status = "Filter: outdated only".to_string();
+        self.set_status(if self.leaves_outdated_only {
+            "Filter: outdated only"
         } else {
-            self.status = "Filter: all leaves".to_string();
-        }
-        self.last_refresh = Instant::now();
+            "Filter: all leaves"
+        });
     }
 
     pub fn selected_package_result(&self) -> Option<&str> {
@@ -110,22 +108,26 @@ impl App {
     pub fn toggle_services_failed_filter(&mut self) {
         self.services_failed_only = !self.services_failed_only;
         self.reconcile_service_selection();
-        self.status = format!("Services filter: {}", self.services_filter_summary());
-        self.last_refresh = Instant::now();
+        self.set_services_filter_status();
     }
 
     pub fn toggle_services_autostart_filter(&mut self) {
         self.services_autostart_only = !self.services_autostart_only;
         self.reconcile_service_selection();
-        self.status = format!("Services filter: {}", self.services_filter_summary());
-        self.last_refresh = Instant::now();
+        self.set_services_filter_status();
     }
 
     pub fn cycle_services_kind_filter(&mut self) {
         self.services_kind_filter = self.services_kind_filter.next();
         self.reconcile_service_selection();
-        self.status = format!("Services filter: {}", self.services_filter_summary());
-        self.last_refresh = Instant::now();
+        self.set_services_filter_status();
+    }
+
+    fn set_services_filter_status(&mut self) {
+        self.set_status(format!(
+            "Services filter: {}",
+            self.services_filter_summary()
+        ));
     }
 
     pub fn services_filter_summary(&self) -> String {

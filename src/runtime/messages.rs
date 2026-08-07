@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use tokio::sync::mpsc;
 
 use crate::app::{App, InputMode};
@@ -153,6 +151,5 @@ pub fn handle_focus_backtab(app: &mut App) {
         crate::app::FocusedPanel::Status => crate::app::FocusedPanel::Sizes,
         crate::app::FocusedPanel::Details => crate::app::FocusedPanel::Status,
     };
-    app.status = format!("Focus: {:?}", app.focus_panel);
-    app.last_refresh = Instant::now();
+    app.set_focus_status();
 }

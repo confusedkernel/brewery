@@ -1,6 +1,7 @@
 mod details;
 mod footer;
 pub mod help;
+pub mod keymap;
 pub mod layout;
 mod leaves;
 mod search;

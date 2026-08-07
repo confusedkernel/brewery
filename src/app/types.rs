@@ -15,14 +15,14 @@ pub enum IconMode {
     Ascii,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PackageAction {
     Install,
     Uninstall,
     Upgrade,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ServiceAction {
     Start,
     Stop,

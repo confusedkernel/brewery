@@ -80,6 +80,26 @@ impl App {
         }
     }
 
+    /// Sets the transient header status and restarts the idle countdown.
+    pub fn set_status(&mut self, status: impl Into<String>) {
+        self.status = status.into();
+        self.last_refresh = Instant::now();
+    }
+
+    pub fn has_pending_confirmation(&self) -> bool {
+        self.pending_package_action.is_some()
+            || self.pending_service_action.is_some()
+            || self.pending_upgrade_all_outdated
+            || self.pending_self_update
+    }
+
+    pub fn clear_pending_confirmations(&mut self) {
+        self.pending_package_action = None;
+        self.pending_service_action = None;
+        self.pending_upgrade_all_outdated = false;
+        self.pending_self_update = false;
+    }
+
     pub fn on_tick(&mut self) {
         if self.pending_command
             || self.pending_leaves
@@ -143,8 +163,7 @@ impl App {
             ThemeMode::Dark => Theme::dark(),
             ThemeMode::Auto => detect_system_theme(),
         };
-        self.status = format!("Theme: {:?}", self.theme_mode);
-        self.last_refresh = Instant::now();
+        self.set_status(format!("Theme: {:?}", self.theme_mode));
     }
 
     pub fn toggle_icons(&mut self) {
@@ -157,21 +176,22 @@ impl App {
             IconMode::Nerd => false,
             IconMode::Auto => detect_icon_ascii(),
         };
-        self.status = format!("Icons: {}", if self.icons_ascii { "ASCII" } else { "Nerd" });
-        self.last_refresh = Instant::now();
+        self.set_status(format!(
+            "Icons: {}",
+            if self.icons_ascii { "ASCII" } else { "Nerd" }
+        ));
     }
 
     pub fn toggle_mouse(&mut self) {
         self.mouse_enabled = !self.mouse_enabled;
-        self.status = format!(
+        self.set_status(format!(
             "Mouse: {}",
             if self.mouse_enabled {
                 "enabled"
             } else {
                 "disabled"
             }
-        );
-        self.last_refresh = Instant::now();
+        ));
     }
 
     pub fn cycle_focus(&mut self) {
@@ -181,8 +201,13 @@ impl App {
             FocusedPanel::Status => FocusedPanel::Details,
             FocusedPanel::Details => FocusedPanel::Leaves,
         };
-        self.status = format!("Focus: {:?}", self.focus_panel);
-        self.last_refresh = Instant::now();
+        self.set_focus_status();
+    }
+
+    /// Focus moves from several places (Tab, S-Tab, mouse clicks); they all
+    /// report it the same way.
+    pub fn set_focus_status(&mut self) {
+        self.set_status(format!("Focus: {:?}", self.focus_panel));
     }
 
     pub fn status_tab_next(&mut self) {
@@ -223,8 +248,7 @@ impl App {
             self.leaves_outdated_only = false;
         }
 
-        self.status = format!("View: {}", self.active_kind_label_plural());
-        self.last_refresh = Instant::now();
+        self.set_status(format!("View: {}", self.active_kind_label_plural()));
     }
 
     pub fn active_kind_label_singular(&self) -> &'static str {

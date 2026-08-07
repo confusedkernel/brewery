@@ -1,11 +1,9 @@
-use std::time::Instant;
-
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use crossterm::terminal::size;
 use ratatui::layout::Rect;
 
 use crate::app::{App, FocusedPanel, InputMode, StatusTab};
-use crate::ui::{help, layout, status_tab_at_column};
+use crate::ui::{keymap, layout, status_tab_at_column};
 
 #[derive(Clone, Copy)]
 enum ScrollDirection {
@@ -60,7 +58,7 @@ fn handle_help_popup_mouse(app: &mut App, mouse: MouseEvent, help_max_offset: us
         }
         MouseEventKind::ScrollDown if contains_point(popup_area, mouse.column, mouse.row) => {
             let visible_height = layout::help_visible_line_capacity(terminal_area());
-            let max_offset = help::help_line_count(app)
+            let max_offset = keymap::line_count()
                 .saturating_sub(visible_height)
                 .min(help_max_offset);
             let next = (app.help_scroll_offset + 1).min(max_offset);
@@ -78,7 +76,7 @@ fn handle_help_popup_mouse(app: &mut App, mouse: MouseEvent, help_max_offset: us
             }
 
             let line = app.help_scroll_offset + mouse.row.saturating_sub(inner.y) as usize;
-            if let Some(command_index) = help::help_command_index_at_line(app, line)
+            if let Some(command_index) = keymap::command_index_at_line(line)
                 && command_index != app.help_selected_command
             {
                 app.help_selected_command = command_index;
@@ -177,7 +175,7 @@ fn scroll_leaves(app: &mut App, direction: ScrollDirection) {
             ScrollDirection::Down => app.select_next_result(),
         }
         if app.package_results_selected != before {
-            clear_pending_confirmations(app);
+            app.clear_pending_confirmations();
             app.on_selection_change();
         }
         return;
@@ -190,7 +188,7 @@ fn scroll_leaves(app: &mut App, direction: ScrollDirection) {
             ScrollDirection::Down => app.select_next(),
         }
         if app.selected_cask_index != before {
-            clear_pending_confirmations(app);
+            app.clear_pending_confirmations();
             app.on_selection_change();
         }
         return;
@@ -202,7 +200,7 @@ fn scroll_leaves(app: &mut App, direction: ScrollDirection) {
         ScrollDirection::Down => app.select_next(),
     }
     if app.selected_index != before {
-        clear_pending_confirmations(app);
+        app.clear_pending_confirmations();
         app.on_selection_change();
     }
 }
@@ -246,7 +244,7 @@ fn select_package_result_row(app: &mut App, row_index: usize, visible_height: us
     let next = Some(list_index);
     if app.package_results_selected != next {
         app.package_results_selected = next;
-        clear_pending_confirmations(app);
+        app.clear_pending_confirmations();
         app.on_selection_change();
     }
 }
@@ -292,7 +290,7 @@ fn select_installed_row(app: &mut App, row_index: usize, visible_height: usize, 
     } else {
         app.selected_index = Some(absolute_index);
     }
-    clear_pending_confirmations(app);
+    app.clear_pending_confirmations();
     app.on_selection_change();
 }
 
@@ -345,8 +343,7 @@ fn focus_panel(app: &mut App, panel: FocusedPanel) {
     }
 
     app.focus_panel = panel;
-    app.status = format!("Focus: {:?}", app.focus_panel);
-    app.last_refresh = Instant::now();
+    app.set_focus_status();
 }
 
 fn terminal_area() -> Rect {
@@ -371,11 +368,4 @@ fn contains_point(area: Rect, x: u16, y: u16) -> bool {
     let max_x = area.x.saturating_add(area.width);
     let max_y = area.y.saturating_add(area.height);
     x >= area.x && x < max_x && y >= area.y && y < max_y
-}
-
-fn clear_pending_confirmations(app: &mut App) {
-    app.pending_package_action = None;
-    app.pending_service_action = None;
-    app.pending_upgrade_all_outdated = false;
-    app.pending_self_update = false;
 }
