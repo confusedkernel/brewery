@@ -10,12 +10,14 @@ pub struct RuntimeChannels {
     pub sizes_tx: mpsc::UnboundedSender<crate::brew::SizesMessage>,
     pub command_tx: mpsc::UnboundedSender<crate::brew::CommandMessage>,
     pub status_tx: mpsc::UnboundedSender<crate::brew::StatusMessage>,
+    pub graph_tx: mpsc::UnboundedSender<crate::brew::GraphMessage>,
     pub leaves_rx: mpsc::UnboundedReceiver<LeavesMessage>,
     pub casks_rx: mpsc::UnboundedReceiver<crate::brew::CasksMessage>,
     pub details_rx: mpsc::UnboundedReceiver<crate::brew::DetailsMessage>,
     pub sizes_rx: mpsc::UnboundedReceiver<crate::brew::SizesMessage>,
     pub command_rx: mpsc::UnboundedReceiver<crate::brew::CommandMessage>,
     pub status_rx: mpsc::UnboundedReceiver<crate::brew::StatusMessage>,
+    pub graph_rx: mpsc::UnboundedReceiver<crate::brew::GraphMessage>,
 }
 
 pub fn create_channels() -> RuntimeChannels {
@@ -25,6 +27,7 @@ pub fn create_channels() -> RuntimeChannels {
     let (sizes_tx, sizes_rx) = mpsc::unbounded_channel();
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (status_tx, status_rx) = mpsc::unbounded_channel();
+    let (graph_tx, graph_rx) = mpsc::unbounded_channel();
 
     RuntimeChannels {
         leaves_tx,
@@ -33,12 +36,14 @@ pub fn create_channels() -> RuntimeChannels {
         sizes_tx,
         command_tx,
         status_tx,
+        graph_tx,
         leaves_rx,
         casks_rx,
         details_rx,
         sizes_rx,
         command_rx,
         status_rx,
+        graph_rx,
     }
 }
 
@@ -78,6 +83,8 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         if should_refresh_leaves {
             app.request_leaves(&channels.leaves_tx);
             app.request_casks(&channels.casks_tx);
+            // Anything that adds or removes kegs invalidates the graph.
+            app.request_graph(&channels.graph_tx);
         }
         if should_refresh_status {
             app.request_status(&channels.status_tx);
@@ -89,6 +96,10 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
     }
     while let Ok(message) = channels.status_rx.try_recv() {
         app.apply_status_message(message);
+        received_message = true;
+    }
+    while let Ok(message) = channels.graph_rx.try_recv() {
+        app.apply_graph_message(message);
         received_message = true;
     }
 

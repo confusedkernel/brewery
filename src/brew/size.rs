@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use super::process::{ensure_success, run_brew};
+use super::process::cellar_path;
 
 #[derive(Clone, Debug)]
 pub struct SizeEntry {
@@ -13,7 +13,7 @@ pub struct SizesMessage {
 }
 
 pub async fn fetch_sizes() -> anyhow::Result<Vec<SizeEntry>> {
-    let cellar = fetch_cellar_path().await?;
+    let cellar = cellar_path().await?;
     let mut entries = Vec::new();
 
     for dir in std::fs::read_dir(&cellar)? {
@@ -61,13 +61,4 @@ fn parse_du_line(line: &str) -> Option<SizeEntry> {
         name,
         size_kb: size,
     })
-}
-
-async fn fetch_cellar_path() -> anyhow::Result<PathBuf> {
-    let output = run_brew(&["--cellar"]).await?;
-    ensure_success(&output, "brew --cellar failed")?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let path = stdout.trim();
-    Ok(PathBuf::from(path))
 }

@@ -3,8 +3,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use crate::app::{App, InputMode, StatusTab, ViewMode};
-use crate::ui::util::{format_size, symbol};
+use crate::app::{App, InputMode, PackageAction, StatusTab, ViewMode};
+use crate::brew::Origin;
+use crate::format::format_size;
+use crate::ui::util::symbol;
 
 pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
@@ -106,6 +108,9 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             .fg(theme.accent)
             .add_modifier(Modifier::BOLD),
     )));
+
+    lines.extend(build_origin_lines(app, pkg));
+    lines.extend(build_removal_impact_lines(app, pkg));
 
     if let Some(details) = app.details_cache.peek(pkg) {
         if let Some(desc) = details.desc.as_ref() {
@@ -230,6 +235,110 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
             Style::default().fg(theme.text_muted),
         )));
     }
+
+    lines
+}
+
+/// Answers "why do I have this?" — something `brew` cannot be asked directly.
+fn build_origin_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    let Some(origin) = app.origin_of(pkg) else {
+        return Vec::new();
+    };
+
+    let arrow = symbol(app, " ← ", " <- ");
+    let mut lines = vec![Line::from("")];
+
+    match origin {
+        Origin::OnRequest => {
+            lines.push(Line::from(Span::styled(
+                "  Installed on request".to_string(),
+                Style::default().fg(theme.green),
+            )));
+        }
+        Origin::RequiredBy {
+            path,
+            direct_dependents,
+        } => {
+            lines.push(Line::from(Span::styled(
+                "  Required by".to_string(),
+                Style::default().fg(theme.text_secondary),
+            )));
+
+            // e.g. `zlib ← libpng ← imagemagick`
+            let mut chain = pkg.to_string();
+            for step in &path {
+                chain.push_str(arrow);
+                chain.push_str(step);
+            }
+            lines.push(Line::from(Span::styled(
+                format!("    {chain}"),
+                Style::default().fg(theme.text_primary),
+            )));
+
+            if direct_dependents > 1 {
+                lines.push(Line::from(Span::styled(
+                    format!("    {direct_dependents} formulae depend on it directly"),
+                    Style::default().fg(theme.text_muted),
+                )));
+            }
+        }
+        Origin::Orphaned => {
+            lines.push(Line::from(Span::styled(
+                "  Orphaned".to_string(),
+                Style::default().fg(theme.orange),
+            )));
+            lines.push(Line::from(Span::styled(
+                "    Nothing requested needs this; brew autoremove would remove it".to_string(),
+                Style::default().fg(theme.text_muted),
+            )));
+        }
+        Origin::Unknown => {}
+    }
+
+    lines
+}
+
+/// Previews the orphan cascade of an uninstall, shown while its confirmation
+/// is armed so the count in the status line can be inspected before confirming.
+fn build_removal_impact_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+
+    let is_awaiting_uninstall = app
+        .pending_package_action
+        .as_ref()
+        .is_some_and(|pending| pending.action == PackageAction::Uninstall && pending.pkg == pkg);
+    if !is_awaiting_uninstall {
+        return Vec::new();
+    }
+
+    let Some(impact) = app.removal_impact_of(pkg) else {
+        return Vec::new();
+    };
+
+    let mut lines = vec![Line::from("")];
+
+    if impact.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  Nothing else depends on this".to_string(),
+            Style::default().fg(theme.green),
+        )));
+        return lines;
+    }
+
+    let freed = impact
+        .freed_kb
+        .map(|kb| format!(" (~{} freed)", format_size(kb)))
+        .unwrap_or_default();
+
+    lines.push(Line::from(Span::styled(
+        format!(
+            "  Uninstalling also orphans {}{freed}",
+            impact.orphaned.len()
+        ),
+        Style::default().fg(theme.orange),
+    )));
+    lines.extend(format_list_multiline(app, &impact.orphaned, theme, "    "));
 
     lines
 }
@@ -452,4 +561,114 @@ fn format_list_multiline(
             ))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::{PackageKind, PendingPackageAction};
+    use crate::brew::{DependencyGraph, FormulaReceipt, Receipts};
+
+    fn text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// `imagemagick` was requested and pulls in `libpng`, which needs `zlib`.
+    fn app_with_graph() -> App {
+        let receipts = Receipts::from([
+            (
+                "imagemagick".to_string(),
+                FormulaReceipt {
+                    on_request: true,
+                    direct: vec!["libpng".to_string()],
+                    runtime: vec!["libpng".to_string(), "zlib".to_string()],
+                },
+            ),
+            (
+                "libpng".to_string(),
+                FormulaReceipt {
+                    on_request: false,
+                    direct: vec!["zlib".to_string()],
+                    runtime: vec!["zlib".to_string()],
+                },
+            ),
+            ("zlib".to_string(), FormulaReceipt::default()),
+        ]);
+
+        let mut app = App::new();
+        app.dependency_graph = Some(DependencyGraph::new(receipts));
+        app
+    }
+
+    #[test]
+    fn marks_an_explicitly_installed_formula() {
+        let app = app_with_graph();
+        assert!(text(&build_origin_lines(&app, "imagemagick")).contains("Installed on request"));
+    }
+
+    #[test]
+    fn shows_the_chain_that_explains_a_dependency() {
+        let app = app_with_graph();
+        let rendered = text(&build_origin_lines(&app, "zlib"));
+
+        assert!(rendered.contains("Required by"));
+        assert!(
+            rendered.contains("zlib")
+                && rendered.contains("libpng")
+                && rendered.contains("imagemagick"),
+            "chain should trace up to the requester, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn says_nothing_about_packages_outside_the_graph() {
+        let app = app_with_graph();
+        assert!(build_origin_lines(&app, "not-installed").is_empty());
+    }
+
+    #[test]
+    fn says_nothing_until_the_graph_loads() {
+        let app = App::new();
+        assert!(build_origin_lines(&app, "imagemagick").is_empty());
+    }
+
+    #[test]
+    fn previews_the_cascade_only_while_its_uninstall_is_armed() {
+        let mut app = app_with_graph();
+        assert!(
+            build_removal_impact_lines(&app, "imagemagick").is_empty(),
+            "no preview without a pending confirmation"
+        );
+
+        app.pending_package_action = Some(PendingPackageAction {
+            action: PackageAction::Uninstall,
+            kind: PackageKind::Formula,
+            pkg: "imagemagick".to_string(),
+        });
+
+        let rendered = text(&build_removal_impact_lines(&app, "imagemagick"));
+        assert!(rendered.contains("orphans 2"), "got:\n{rendered}");
+        assert!(rendered.contains("libpng") && rendered.contains("zlib"));
+    }
+
+    #[test]
+    fn does_not_preview_a_cascade_for_a_pending_install() {
+        let mut app = app_with_graph();
+        app.pending_package_action = Some(PendingPackageAction {
+            action: PackageAction::Install,
+            kind: PackageKind::Formula,
+            pkg: "imagemagick".to_string(),
+        });
+
+        assert!(build_removal_impact_lines(&app, "imagemagick").is_empty());
+    }
 }

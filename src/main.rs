@@ -1,5 +1,6 @@
 mod app;
 mod brew;
+mod format;
 mod runtime;
 mod theme;
 mod ui;

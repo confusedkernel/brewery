@@ -100,6 +100,11 @@ pub static SECTIONS: &[Section] = &[
             key("/", "Search installed list", KeyCode::Char('/')),
             key("f", "Find packages", KeyCode::Char('f')),
             key("C", "Toggle formula/cask list", KeyCode::Char('C')),
+            key(
+                "L",
+                "Toggle leaves / all installed formulae",
+                KeyCode::Char('L'),
+            ),
         ],
     },
     Section {

@@ -17,24 +17,73 @@ _Browse, search, and manage your Homebrew packages with ease_
 
 </div>
 
+## Why Brewery
+
+Homebrew tells you *what* you have. Brewery tells you why it's there and what it
+costs you — questions the CLI can't answer without chaining several commands and
+reading the output yourself.
+
+**"Why do I have this?"** — select any installed formula and the Details panel
+traces it back to whatever you actually asked for:
+
+```
+  openssl@3
+
+  Required by
+    openssl@3 ← nmap
+    12 formulae depend on it directly
+```
+
+There is no `brew why`. Getting this by hand means `brew uses --installed`, then
+tracing each result upward one level at a time.
+
+**Uninstall impact** — `brew uninstall` removes exactly what you name and
+silently strands its dependencies until you remember `brew autoremove`. Brewery
+tells you first:
+
+```
+Uninstall formula ffmpeg? +46 orphans (~263.1M) [u] confirm, [Esc] cancel
+```
+
+While the confirmation is armed, the Details panel lists all 46 by name, so you
+can check what you are about to lose before pressing `u` again.
+
+Both are built from Homebrew's own install receipts — the same data
+`brew autoremove` reasons about — so the orphan set is verified to agree with
+`brew autoremove --dry-run` exactly. Notably, formulae you installed on purpose
+are never reported as collateral, even when something else also depends on them.
+
 ## Features
 
-- **📦 Package Browser** — Browse installed leaves with instant search filtering
-- **🍻 Cask Browser** — Toggle to installed casks and manage them with the same quick actions
-- **🔍 Advanced Search** — Search all available Homebrew packages
-- **📊 Rich Details** — View descriptions, homepage, versions, dependencies, and reverse dependencies
-- **📈 Status Panel** — Track activity, diagnostics issues, outdated packages, and brew update recency
-- **🧰 Service Controls** — View Homebrew service states and run start/stop/restart from the Services tab
-- **🩺 Service Inspector** — See state, exit code, backend type, filters, and troubleshooting hints in one screen
-- **📏 Size Analytics** — Leaderboard of installed packages by disk usage
-- **⚡ Quick Actions** — Install, uninstall, upgrade, upgrade all outdated, cleanup, autoremove, and export Brewfiles
-- **🔄 Self Update** — Detect new Brewery releases and update in-app via Cargo
-- **🎯 Outdated Workflow** — Toggle outdated-only leaves filter and batch-upgrade outdated packages
-- **🕘 Command History** — Browse recent command runs with exit status in Status -> History
-- **🔁 Background Refresh** — Periodically refresh status/outdated/services and show in-panel progress
-- **🖱️ Mouse Navigation** — Click to focus/select and use scroll wheel to navigate panels
-- **🎨 Adaptive Theming** — Auto-detects system theme with manual override (light/dark)
-- **🖥️ Pure Terminal** — No browser required, works entirely in your terminal
+**Browsing**
+
+- Installed formulae, either leaves only or all of them (`L`)
+- Installed casks, with the same actions (`Shift+C`)
+- Instant search filtering, plus search across all of Homebrew
+- Rich details: description, homepage, versions, dependencies, reverse dependencies
+
+**Insight**
+
+- Dependency provenance — why each formula is installed
+- Uninstall impact preview with orphan count and disk reclaimed
+- Size leaderboard of installed packages by disk usage
+- Status panel for diagnostics, outdated packages, and `brew update` recency
+
+**Management**
+
+- Install, uninstall, upgrade, and batch-upgrade all outdated packages
+- Cleanup, autoremove, and Brewfile export
+- Service controls — start, stop, restart, inspect, and filter `brew services`
+- Command history with exit status
+- Self-update via Cargo when a new release is available
+
+**Interface**
+
+- Adaptive theming with light/dark auto-detection and manual override
+- Mouse navigation — click to focus and select, scroll to move
+- Nerd Font icons with an ASCII fallback
+- Background refresh with in-panel progress
+- Runs entirely in your terminal
 
 ## Installation
 
@@ -48,15 +97,18 @@ cargo install brewery
 - Rust toolchain (edition 2024)
 - Terminal with True Color support
 
-### Font
+### Environment
 
-Nerd Font is optional. Use ASCII mode with `BREWERY_ASCII=1` or press `Alt+i` in-app.
+| Variable         | Effect                                             |
+| ---------------- | -------------------------------------------------- |
+| `BREWERY_ASCII`  | Set to `1` to force ASCII icons instead of Nerd Font |
+| `BREWERY_MOUSE`  | Set to `0` to start with mouse capture disabled     |
 
-### Mouse
-
-Mouse support is enabled by default. Start with `BREWERY_MOUSE=0` to disable capture, or press `m` in-app to toggle it.
+Both are also toggleable in-app with `Alt+i` and `m`.
 
 ## Keyboard Shortcuts
+
+Press `?` in-app for the same list, where `Enter` runs the highlighted command.
 
 ### Navigation
 
@@ -64,67 +116,83 @@ Mouse support is enabled by default. Start with `BREWERY_MOUSE=0` to disable cap
 | ------------------ | -------------------------- |
 | `j`/`k` or `↑`/`↓` | Move selection             |
 | `Tab`/`Shift+Tab`  | Cycle focus between panels |
-| `Shift+C`          | Toggle formulae/casks list |
 | `l`/`;` or `←`/`→` | Cycle status tabs          |
-
-### Mouse
-
-| Input          | Action                                                  |
-| -------------- | ------------------------------------------------------- |
-| Left click     | Focus panel, select list item, or switch status tab    |
-| Scroll wheel   | Scroll/select within the panel under the cursor        |
 
 ### Search
 
-| Key     | Action                                |
-| ------- | ------------------------------------- |
-| `/`     | Filter installed list (formulae/casks) |
-| `f`     | Search all packages                   |
-| `Enter` | Confirm search / Exit filter mode     |
-| `Esc`   | Cancel / Clear filter                 |
+| Key       | Action                                   |
+| --------- | ---------------------------------------- |
+| `/`       | Filter the installed list                |
+| `f`       | Search all Homebrew packages             |
+| `Shift+C` | Toggle formulae / casks                  |
+| `Shift+L` | Toggle leaves only / all installed formulae |
+| `Enter`   | Confirm search, or exit filter mode      |
+| `Esc`     | Cancel, or clear the filter              |
 
-### Package Management
+### Actions
 
-| Key     | Action                                     |
-| ------- | ------------------------------------------ |
-| `i`     | Install selected formula/cask (press twice to confirm)   |
-| `u`     | Uninstall selected formula/cask (press twice to confirm) |
-| `Shift+U` | Upgrade selected formula/cask, or upgrade all outdated formulae in Status -> Outdated (press twice to confirm) |
-| `Enter` | Load package details                       |
-| `d`     | Load dependencies and reverse dependencies |
+Destructive actions are confirmed by pressing the same key twice.
 
-### Maintenance
+| Key       | Action                                                                   |
+| --------- | ------------------------------------------------------------------------ |
+| `Enter`   | Load package details                                                     |
+| `d`       | Load dependencies and reverse dependencies                               |
+| `i`       | Install selected package                                                 |
+| `u`       | Uninstall selected package, with orphan impact preview                   |
+| `Shift+U` | Upgrade selected package, or all outdated from Status → Outdated         |
+| `o`       | Toggle outdated-only filter                                              |
+| `Shift+P` | Update Brewery via Cargo                                                 |
+
+### Services
+
+Available from the Status → Services tab.
+
+| Key       | Action                                    |
+| --------- | ----------------------------------------- |
+| `Shift+S` | Start selected service                    |
+| `Shift+X` | Stop selected service                     |
+| `Shift+R` | Restart selected service                  |
+| `Shift+I` | Show service info (`brew services info`)  |
+| `Shift+F` | Filter to failed services                 |
+| `Shift+A` | Filter to auto-start services             |
+| `Shift+K` | Cycle backend filter (all/formula/cask)   |
+
+### Data & Maintenance
 
 | Key | Action                         |
 | --- | ------------------------------ |
-| `r` | Refresh package list           |
+| `r` | Refresh formulae and casks     |
 | `s` | Load package sizes             |
 | `h` | Run status check               |
-| `Shift+P` | Update Brewery via Cargo (press twice to confirm) |
-| `o` | Toggle outdated-only formula filter |
 | `c` | Cleanup old versions           |
 | `a` | Autoremove unused dependencies |
 | `b` | Export Brewfile (bundle dump)  |
-| `Shift+S` | Start selected service (Status -> Services, press twice to confirm) |
-| `Shift+X` | Stop selected service (Status -> Services, press twice to confirm) |
-| `Shift+R` | Restart selected service (Status -> Services, press twice to confirm) |
-| `Shift+I` | Show selected service info (`brew services info`) |
-| `Shift+F` | Toggle failed-only services filter |
-| `Shift+A` | Toggle auto-start-only services filter |
-| `Shift+K` | Cycle services backend filter (all/formula/cask) |
 
 ### View
 
-| Key     | Action                         |
-| ------- | ------------------------------ |
-| `v`     | Toggle details/results view    |
-| `t`     | Toggle theme (auto/light/dark) |
-| `m`     | Toggle mouse support           |
-| `Alt+i` | Toggle Nerd Font / ASCII icons |
-| `?`     | Show help                      |
-| `q`     | Quit                           |
+| Key     | Action                          |
+| ------- | ------------------------------- |
+| `v`     | Toggle details / results view   |
+| `t`     | Cycle theme (auto/light/dark)   |
+| `m`     | Toggle mouse support            |
+| `Alt+i` | Toggle Nerd Font / ASCII icons  |
+| `?`     | Show help                       |
+| `q`     | Quit                            |
+
+### Mouse
+
+| Input        | Action                                              |
+| ------------ | --------------------------------------------------- |
+| Left click   | Focus a panel, select an item, or switch status tab |
+| Scroll wheel | Scroll or select within the panel under the cursor  |
 
 ---
+
+## Notes
+
+Dependency analysis covers formulae. Casks are browsed and managed the same way,
+but Homebrew keeps no install receipts for them, so provenance and impact
+previews are omitted rather than guessed at.
 
 ## Changelog
 

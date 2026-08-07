@@ -47,16 +47,21 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         } else {
             String::new()
         };
-        let title = format!(" Leaves ({}){}", leaves.len(), filter_suffix);
+        let scope = if app.leaves_only {
+            "Leaves"
+        } else {
+            "Formulae"
+        };
+        let title = format!(" {scope} ({}){}", leaves.len(), filter_suffix);
         let rows = if leaves.is_empty() {
             let empty_label = if app.leaves_outdated_only {
                 if app.system_status.is_some() {
-                    "  No outdated leaves"
+                    "  No outdated packages"
                 } else {
                     "  No outdated data yet (press h)"
                 }
             } else {
-                "  No leaves found"
+                "  Nothing installed found"
             };
             vec![styled_item(empty_label, theme.text_muted)]
         } else {

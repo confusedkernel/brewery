@@ -42,6 +42,7 @@ pub async fn run_app(
     app.request_casks(&channels.casks_tx);
     app.request_status(&channels.status_tx);
     app.request_sizes(&channels.sizes_tx);
+    app.request_graph(&channels.graph_tx);
 
     loop {
         let current_uptime_second = app.started_at.elapsed().as_secs();

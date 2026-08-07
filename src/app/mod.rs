@@ -1,4 +1,5 @@
 mod filters;
+mod insights;
 mod reducers;
 mod requests;
 mod state;
@@ -17,9 +18,10 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 
 use crate::brew::{
-    CasksMessage, CommandKind, CommandMessage, Details, DetailsLoad, DetailsMessage, LeavesMessage,
-    SizeEntry, SizesMessage, StatusMessage, StatusSnapshot, fetch_casks, fetch_details_basic,
-    fetch_details_full, fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
+    CasksMessage, CommandKind, CommandMessage, DependencyGraph, Details, DetailsLoad,
+    DetailsMessage, GraphMessage, LeavesMessage, SizeEntry, SizesMessage, StatusMessage,
+    StatusSnapshot, fetch_casks, fetch_dependency_graph, fetch_details_basic, fetch_details_full,
+    fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -39,7 +41,15 @@ pub struct App {
     pub leaves_query: String,
     pub package_query: String,
     pub active_package_kind: PackageKind,
+    /// The formula list currently on display, derived from one of the two
+    /// scopes below via [`App::sync_installed_list`].
     pub leaves: Vec<String>,
+    /// `brew leaves` — formulae nothing else depends on.
+    pub leaf_formulae: Vec<String>,
+    /// Every installed formula, which is where dependency provenance gets
+    /// interesting.
+    pub all_formulae: Vec<String>,
+    pub leaves_only: bool,
     pub casks: Vec<String>,
     pub filtered_leaves: Vec<usize>,
     pub filtered_casks: Vec<usize>,
@@ -87,6 +97,10 @@ pub struct App {
     pub sizes_scroll_offset: usize,
     pub details_scroll_offset: usize,
     pub status_scroll_offset: usize,
+    /// Installed dependency graph, backing "why do I have this?" and the
+    /// uninstall impact preview.
+    pub dependency_graph: Option<DependencyGraph>,
+    pub pending_graph: bool,
     pub system_status: Option<StatusSnapshot>,
     pub pending_status: bool,
     pub last_status_check: Option<Instant>,

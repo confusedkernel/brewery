@@ -3,10 +3,13 @@ use super::*;
 impl App {
     pub fn apply_leaves_message(&mut self, message: LeavesMessage) {
         match message.result {
-            Ok(mut leaves) => {
-                leaves.sort();
-                self.leaves = leaves;
-                self.update_filtered_leaves();
+            Ok(mut installed) => {
+                installed.leaves.sort();
+                installed.all.sort();
+                self.leaf_formulae = installed.leaves;
+                self.all_formulae = installed.all;
+
+                self.sync_installed_list();
                 if self.leaves.is_empty() {
                     self.selected_index = None;
                 } else if self
@@ -111,6 +114,19 @@ impl App {
         self.pending_casks = false;
         self.pending_casks_started_at = None;
         self.last_refresh = Instant::now();
+        self.needs_redraw = true;
+    }
+
+    /// The graph loads quietly in the background — it supports other views
+    /// rather than being something the user asked for, so it neither claims the
+    /// status line on success nor reports a failure as a command error.
+    pub fn apply_graph_message(&mut self, message: GraphMessage) {
+        match message.result {
+            Ok(graph) => self.dependency_graph = Some(graph),
+            Err(_) => self.dependency_graph = None,
+        }
+
+        self.pending_graph = false;
         self.needs_redraw = true;
     }
 

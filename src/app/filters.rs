@@ -10,6 +10,48 @@ impl App {
         self.outdated_leaves.contains(pkg)
     }
 
+    /// Rebuilds the displayed formula list from the active scope, keeping the
+    /// selection on the same package where it still exists — the two scopes
+    /// index differently, so the raw index is meaningless across a switch.
+    pub fn sync_installed_list(&mut self) {
+        let previous = self.selected_leaf().map(str::to_string);
+
+        self.leaves = if self.leaves_only {
+            self.leaf_formulae.clone()
+        } else {
+            self.all_formulae.clone()
+        };
+
+        // The old index means something different in the new scope, and would
+        // otherwise survive reconciliation while pointing at an unrelated
+        // package. Drop it, then restore by name.
+        self.selected_index = None;
+        self.update_filtered_leaves();
+
+        if let Some(previous) = previous
+            && let Some(index) = self.leaves.iter().position(|name| *name == previous)
+            && self.filtered_leaves.contains(&index)
+        {
+            self.selected_index = Some(index);
+        }
+    }
+
+    pub fn toggle_leaves_scope(&mut self) {
+        if self.is_cask_mode() {
+            self.set_status("List scope only applies to formulae");
+            return;
+        }
+
+        self.leaves_only = !self.leaves_only;
+        self.sync_installed_list();
+
+        self.set_status(if self.leaves_only {
+            format!("Showing {} leaves", self.leaves.len())
+        } else {
+            format!("Showing all {} formulae", self.leaves.len())
+        });
+    }
+
     pub fn toggle_outdated_filter(&mut self) {
         if self.is_cask_mode() {
             self.set_status("Outdated filter only applies to formulae");
@@ -397,7 +439,106 @@ fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_ascii_case_insensitive, leaf_matches_query};
+    use super::{App, PackageKind, contains_ascii_case_insensitive, leaf_matches_query};
+
+    /// Two leaves, plus the dependencies they pulled in.
+    fn app_with_both_scopes() -> App {
+        let mut app = App::new();
+        app.leaf_formulae = vec!["imagemagick".to_string(), "wget".to_string()];
+        app.all_formulae = vec![
+            "imagemagick".to_string(),
+            "libpng".to_string(),
+            "wget".to_string(),
+            "zlib".to_string(),
+        ];
+        app.sync_installed_list();
+        app
+    }
+
+    #[test]
+    fn shows_only_leaves_by_default() {
+        let app = app_with_both_scopes();
+        assert!(app.leaves_only);
+        assert_eq!(app.leaves, ["imagemagick", "wget"]);
+    }
+
+    #[test]
+    fn widening_the_scope_reveals_dependencies() {
+        let mut app = app_with_both_scopes();
+        app.toggle_leaves_scope();
+
+        assert!(!app.leaves_only);
+        assert_eq!(app.leaves, ["imagemagick", "libpng", "wget", "zlib"]);
+        assert!(app.status.contains('4'), "status should report the count");
+    }
+
+    /// The two scopes index differently, so a preserved index would silently
+    /// move the selection to an unrelated package.
+    #[test]
+    fn keeps_the_selection_on_the_same_package_when_widening() {
+        let mut app = app_with_both_scopes();
+        app.selected_index = Some(1); // wget
+        assert_eq!(app.selected_leaf(), Some("wget"));
+
+        app.toggle_leaves_scope();
+
+        assert_eq!(
+            app.selected_leaf(),
+            Some("wget"),
+            "wget moved to index 2 in the wider scope"
+        );
+    }
+
+    #[test]
+    fn keeps_the_selection_when_narrowing_back() {
+        let mut app = app_with_both_scopes();
+        app.toggle_leaves_scope();
+        app.selected_index = Some(2); // wget, in the wider scope
+        app.toggle_leaves_scope();
+
+        assert!(app.leaves_only);
+        assert_eq!(app.selected_leaf(), Some("wget"));
+    }
+
+    #[test]
+    fn falls_back_when_the_selection_leaves_the_scope() {
+        let mut app = app_with_both_scopes();
+        app.toggle_leaves_scope();
+        app.selected_index = Some(1); // libpng, which is not a leaf
+        assert_eq!(app.selected_leaf(), Some("libpng"));
+
+        app.toggle_leaves_scope();
+
+        assert_eq!(
+            app.selected_leaf(),
+            Some("imagemagick"),
+            "a selection that no longer exists should land on the first entry"
+        );
+    }
+
+    #[test]
+    fn refuses_to_change_scope_in_cask_mode() {
+        let mut app = app_with_both_scopes();
+        app.active_package_kind = PackageKind::Cask;
+        app.toggle_leaves_scope();
+
+        assert!(app.leaves_only, "cask mode has no leaves/all distinction");
+        assert!(app.status.contains("formulae"));
+    }
+
+    #[test]
+    fn respects_the_active_search_filter_across_a_scope_change() {
+        let mut app = app_with_both_scopes();
+        app.leaves_query = "png".to_string();
+        app.toggle_leaves_scope();
+
+        let matches: Vec<&String> = app
+            .filtered_leaves
+            .iter()
+            .filter_map(|idx| app.leaves.get(*idx))
+            .collect();
+        assert_eq!(matches, ["libpng"]);
+    }
 
     #[test]
     fn matches_ascii_query_case_insensitively() {

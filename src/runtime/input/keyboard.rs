@@ -51,6 +51,7 @@ enum NormalAction {
     FindPackages,
     ToggleOutdatedFilter,
     ToggleInstalledKind,
+    ToggleLeavesScope,
     Package(PackageAction),
     UpgradeSelectedOrOutdated,
     Service(ServiceAction),
@@ -206,6 +207,7 @@ fn normal_action_for(key: KeyEvent) -> Option<NormalAction> {
         KeyCode::Char('f') => NormalAction::FindPackages,
         KeyCode::Char('o') => NormalAction::ToggleOutdatedFilter,
         KeyCode::Char('C') => NormalAction::ToggleInstalledKind,
+        KeyCode::Char('L') => NormalAction::ToggleLeavesScope,
         KeyCode::Char('i') => NormalAction::Package(PackageAction::Install),
         KeyCode::Char('u') => NormalAction::Package(PackageAction::Uninstall),
         KeyCode::Char('U') => NormalAction::UpgradeSelectedOrOutdated,
@@ -295,6 +297,10 @@ fn run_normal_action(
             {
                 app.request_status(&channels.status_tx);
             }
+        }
+        NormalAction::ToggleLeavesScope => {
+            app.clear_pending_confirmations();
+            app.toggle_leaves_scope();
         }
         NormalAction::ToggleInstalledKind => {
             app.clear_pending_confirmations();
@@ -647,8 +653,17 @@ fn run_or_confirm_package_action(
         return;
     }
 
+    // Uninstalls can silently orphan dependencies, so say so before confirming.
+    let impact = match action {
+        PackageAction::Uninstall => app
+            .removal_impact_hint(&pkg)
+            .map(|hint| format!(" {hint}"))
+            .unwrap_or_default(),
+        PackageAction::Install | PackageAction::Upgrade => String::new(),
+    };
+
     let confirmation_status = format!(
-        "{} {noun} {pkg}? [{}] confirm, [Esc] cancel",
+        "{} {noun} {pkg}?{impact} [{}] confirm, [Esc] cancel",
         labels.verb_title, labels.confirm_key
     );
     app.pending_upgrade_all_outdated = false;

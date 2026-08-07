@@ -128,6 +128,20 @@ impl App {
         });
     }
 
+    pub fn request_graph(&mut self, tx: &mpsc::UnboundedSender<GraphMessage>) {
+        if self.pending_graph {
+            return;
+        }
+
+        self.pending_graph = true;
+
+        spawn_request(tx, async {
+            GraphMessage {
+                result: fetch_dependency_graph().await,
+            }
+        });
+    }
+
     pub fn request_status(&mut self, tx: &mpsc::UnboundedSender<StatusMessage>) {
         if self.pending_status {
             return;
