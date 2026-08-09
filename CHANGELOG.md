@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-09
+
+### Added
+- Dependency provenance in the Details panel, tracing any installed formula back to the explicitly installed formula that pulled it in, with its direct dependent count
+- Uninstall impact preview: the confirmation prompt reports how many formulae would be orphaned and the disk space reclaimed, and Details lists them by name while the confirmation is armed
+- Installed-list scope toggle via `L`, switching between `brew leaves` and all installed formulae
+- GitHub Actions CI running rustfmt, clippy, and tests, plus a macOS build check
+
+### Changed
+- Dependency data is now built from Homebrew's install receipts (`INSTALL_RECEIPT.json`) rather than `brew deps`, so it reflects what is actually on disk and agrees with `brew autoremove`
+- Formulae you installed on purpose are never reported as uninstall collateral, even when something else also depends on them
+- Installed formulae are fetched in both scopes (`brew leaves` and `brew list --formula`) in one pass, so the two can never disagree
+
+### Refactored
+- Keyboard handling and the help panel now share a single keymap table (`ui/keymap.rs`)
+- Size formatting extracted into a shared `format` module
+
 ## [0.5.0] - 2026-03-13
 
 ### Added
