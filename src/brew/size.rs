@@ -46,7 +46,7 @@ pub async fn fetch_sizes() -> anyhow::Result<Vec<SizeEntry>> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut sizes: Vec<SizeEntry> = stdout.lines().filter_map(parse_du_line).collect();
 
-    sizes.sort_by(|a, b| b.size_kb.cmp(&a.size_kb));
+    sizes.sort_by_key(|entry| std::cmp::Reverse(entry.size_kb));
     Ok(sizes)
 }
 

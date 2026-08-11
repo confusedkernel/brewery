@@ -102,29 +102,26 @@ pub fn detect_system_theme() -> Theme {
 #[cfg(not(target_os = "macos"))]
 pub fn detect_system_theme() -> Theme {
     // Check COLORFGBG env var
-    if let Ok(colorfgbg) = std::env::var("COLORFGBG") {
-        if let Some(bg) = colorfgbg.split(';').last() {
-            if let Ok(bg_num) = bg.parse::<u8>() {
-                if bg_num == 0 || (bg_num >= 8 && bg_num <= 15) {
-                    return Theme::dark();
-                }
-                return Theme::light();
-            }
+    if let Ok(colorfgbg) = std::env::var("COLORFGBG")
+        && let Some(bg) = colorfgbg.split(';').next_back()
+        && let Ok(bg_num) = bg.parse::<u8>()
+    {
+        if bg_num == 0 || (8..=15).contains(&bg_num) {
+            return Theme::dark();
         }
+        return Theme::light();
     }
 
     // Check for common dark mode indicators
     if let Ok(term) = std::env::var("TERM_PROGRAM") {
         let term_lower = term.to_lowercase();
-        if term_lower.contains("iterm")
+        if (term_lower.contains("iterm")
             || term_lower.contains("alacritty")
-            || term_lower.contains("kitty")
+            || term_lower.contains("kitty"))
+            && let Ok(appearance) = std::env::var("TERM_PROGRAM_VERSION")
+            && appearance.contains("light")
         {
-            if let Ok(appearance) = std::env::var("TERM_PROGRAM_VERSION") {
-                if appearance.contains("light") {
-                    return Theme::light();
-                }
-            }
+            return Theme::light();
         }
     }
 
