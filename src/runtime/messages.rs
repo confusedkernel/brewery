@@ -11,6 +11,7 @@ pub struct RuntimeChannels {
     pub command_tx: mpsc::UnboundedSender<crate::brew::CommandMessage>,
     pub status_tx: mpsc::UnboundedSender<crate::brew::StatusMessage>,
     pub graph_tx: mpsc::UnboundedSender<crate::brew::GraphMessage>,
+    pub doctor_tx: mpsc::UnboundedSender<crate::brew::DoctorMessage>,
     pub leaves_rx: mpsc::UnboundedReceiver<LeavesMessage>,
     pub casks_rx: mpsc::UnboundedReceiver<crate::brew::CasksMessage>,
     pub details_rx: mpsc::UnboundedReceiver<crate::brew::DetailsMessage>,
@@ -18,6 +19,7 @@ pub struct RuntimeChannels {
     pub command_rx: mpsc::UnboundedReceiver<crate::brew::CommandMessage>,
     pub status_rx: mpsc::UnboundedReceiver<crate::brew::StatusMessage>,
     pub graph_rx: mpsc::UnboundedReceiver<crate::brew::GraphMessage>,
+    pub doctor_rx: mpsc::UnboundedReceiver<crate::brew::DoctorMessage>,
 }
 
 pub fn create_channels() -> RuntimeChannels {
@@ -28,6 +30,7 @@ pub fn create_channels() -> RuntimeChannels {
     let (command_tx, command_rx) = mpsc::unbounded_channel();
     let (status_tx, status_rx) = mpsc::unbounded_channel();
     let (graph_tx, graph_rx) = mpsc::unbounded_channel();
+    let (doctor_tx, doctor_rx) = mpsc::unbounded_channel();
 
     RuntimeChannels {
         leaves_tx,
@@ -37,6 +40,7 @@ pub fn create_channels() -> RuntimeChannels {
         command_tx,
         status_tx,
         graph_tx,
+        doctor_tx,
         leaves_rx,
         casks_rx,
         details_rx,
@@ -44,6 +48,7 @@ pub fn create_channels() -> RuntimeChannels {
         command_rx,
         status_rx,
         graph_rx,
+        doctor_rx,
     }
 }
 
@@ -88,6 +93,7 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
         }
         if should_refresh_status {
             app.request_status(&channels.status_tx);
+            app.request_doctor(&channels.doctor_tx);
         }
         if let Some(pkg) = refresh_details_pkg {
             app.request_details_forced(&pkg, DetailsLoad::Basic, &channels.details_tx);
@@ -100,6 +106,10 @@ pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
     }
     while let Ok(message) = channels.graph_rx.try_recv() {
         app.apply_graph_message(message);
+        received_message = true;
+    }
+    while let Ok(message) = channels.doctor_rx.try_recv() {
+        app.apply_doctor_message(message);
         received_message = true;
     }
 

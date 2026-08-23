@@ -230,7 +230,7 @@ fn trace_path(parents: &HashMap<&str, &str>, start: &str, ancestor: &str) -> Vec
 
 /// Receipts record tap-qualified names (`org/tap/pkg`); everything else in the
 /// app uses the bare name.
-fn short_name(name: &str) -> String {
+pub(super) fn short_name(name: &str) -> String {
     name.rsplit('/').next().unwrap_or(name).trim().to_string()
 }
 
@@ -263,7 +263,10 @@ fn read_receipts(cellar: &Path) -> anyhow::Result<Receipts> {
     };
 
     for entry in entries.flatten() {
-        if !entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+        // Follows symlinks so alias formulae (`rustfmt` -> `rust`) get a
+        // receipt too. Without one they appear in the list panel but have no
+        // provenance to show.
+        if !entry.path().is_dir() {
             continue;
         }
 

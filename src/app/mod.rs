@@ -19,9 +19,10 @@ use lru::LruCache;
 
 use crate::brew::{
     CasksMessage, CommandKind, CommandMessage, DependencyGraph, Details, DetailsLoad,
-    DetailsMessage, GraphMessage, LeavesMessage, SizeEntry, SizesMessage, StatusMessage,
-    StatusSnapshot, fetch_casks, fetch_dependency_graph, fetch_details_basic, fetch_details_full,
-    fetch_leaves, fetch_sizes, fetch_status, run_brew_command, run_command,
+    DetailsMessage, DoctorMessage, DoctorReport, GraphMessage, LeavesMessage, SizeEntry,
+    SizesMessage, StatusMessage, StatusSnapshot, fetch_casks, fetch_dependency_graph,
+    fetch_details_basic, fetch_details_full, fetch_doctor, fetch_leaves, fetch_sizes, fetch_status,
+    run_brew_command, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -103,6 +104,10 @@ pub struct App {
     pub pending_graph: bool,
     pub system_status: Option<StatusSnapshot>,
     pub pending_status: bool,
+    /// `brew doctor`, on its own clock. Fills in after the rest of the status
+    /// panel rather than holding it up.
+    pub doctor: Option<DoctorReport>,
+    pub pending_doctor: bool,
     pub last_status_check: Option<Instant>,
     pub status_tab: StatusTab,
     pub services_selected_index: Option<usize>,

@@ -69,6 +69,8 @@ impl App {
             pending_graph: false,
             system_status: None,
             pending_status: false,
+            doctor: None,
+            pending_doctor: false,
             last_status_check: None,
             status_tab: StatusTab::default(),
             services_selected_index: None,
@@ -314,7 +316,7 @@ impl App {
         self.system_status.as_ref().map_or(0, |h| {
             let count = match self.status_tab {
                 StatusTab::Outdated => h.outdated_packages.len(),
-                StatusTab::Issues => h.doctor_issues.len(),
+                StatusTab::Issues => self.doctor.as_ref().map_or(0, |d| d.issues.len()),
                 StatusTab::Services => self.filtered_service_count(),
                 StatusTab::History => self.command_history.len(),
                 StatusTab::Activity => self.activity_item_count(),

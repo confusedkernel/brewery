@@ -24,7 +24,7 @@ const IDLE_TICK_RATE: Duration = Duration::from_secs(1);
 /// Details will only be fetched after the user has stopped on an item for this duration.
 const DETAILS_DEBOUNCE: Duration = Duration::from_millis(300);
 
-/// Periodic background status refresh (doctor/outdated/services).
+/// Periodic background status refresh (outdated/services/doctor).
 const BACKGROUND_STATUS_REFRESH: Duration = Duration::from_secs(5 * 60);
 
 pub async fn run_app(
@@ -41,6 +41,7 @@ pub async fn run_app(
     app.request_leaves(&channels.leaves_tx);
     app.request_casks(&channels.casks_tx);
     app.request_status(&channels.status_tx);
+    app.request_doctor(&channels.doctor_tx);
     app.request_sizes(&channels.sizes_tx);
     app.request_graph(&channels.graph_tx);
 
@@ -66,6 +67,7 @@ pub async fn run_app(
                 .is_some_and(|last| last.elapsed() >= BACKGROUND_STATUS_REFRESH)
         {
             app.request_status(&channels.status_tx);
+            app.request_doctor(&channels.doctor_tx);
         }
 
         // Debounced auto-fetch details for package search results

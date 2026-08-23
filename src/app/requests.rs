@@ -151,9 +151,27 @@ impl App {
         self.pending_status_started_at = Some(Instant::now());
         set_request_status(self, "Checking status...", true);
 
-        spawn_request(tx, async {
+        let known_leaves = (!self.leaf_formulae.is_empty()).then(|| self.leaf_formulae.clone());
+        spawn_request(tx, async move {
             StatusMessage {
-                result: fetch_status().await,
+                result: fetch_status(known_leaves).await,
+            }
+        });
+    }
+
+    /// Deliberately quiet: no status-line text and no spinner. The doctor run
+    /// outlives the rest of the status check, and announcing it would put the
+    /// panel back to looking busy for the second it saves.
+    pub fn request_doctor(&mut self, tx: &mpsc::UnboundedSender<DoctorMessage>) {
+        if self.pending_doctor {
+            return;
+        }
+
+        self.pending_doctor = true;
+
+        spawn_request(tx, async {
+            DoctorMessage {
+                result: fetch_doctor().await,
             }
         });
     }

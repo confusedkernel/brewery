@@ -1,14 +1,25 @@
 use std::path::PathBuf;
 use std::process::Output;
 
+use tokio::sync::OnceCell;
+
+/// Resolved once per process. The Cellar cannot move while the app is running,
+/// and three separate scans want the path.
+static CELLAR: OnceCell<PathBuf> = OnceCell::const_new();
+
 /// The Cellar root, where per-formula keg directories and their install
 /// receipts live.
 pub(super) async fn cellar_path() -> anyhow::Result<PathBuf> {
-    let output = run_brew(&["--cellar"]).await?;
-    ensure_success(&output, "brew --cellar failed")?;
+    CELLAR
+        .get_or_try_init(|| async {
+            let output = run_brew(&["--cellar"]).await?;
+            ensure_success(&output, "brew --cellar failed")?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(PathBuf::from(stdout.trim()))
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            Ok(PathBuf::from(stdout.trim()))
+        })
+        .await
+        .cloned()
 }
 
 pub(super) async fn run_brew(args: &[&str]) -> anyhow::Result<Output> {

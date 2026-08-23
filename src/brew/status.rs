@@ -1,4 +1,5 @@
 use super::services::{ServiceEntry, fetch_services};
+use crate::brew::graph::short_name;
 use crate::brew::{run_brew_command, run_command};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -17,12 +18,9 @@ static LATEST_BREWERY_CACHE: OnceLock<Mutex<Option<LatestBreweryCacheEntry>>> = 
 
 #[derive(Clone, Debug, Default)]
 pub struct StatusSnapshot {
-    pub doctor_ok: Option<bool>,
-    pub doctor_issues: Vec<String>,
     pub outdated_count: Option<usize>,
     pub outdated_packages: Vec<String>,
     pub brew_version: Option<String>,
-    pub brew_info: Option<String>,
     pub brew_update_status: Option<String>,
     pub last_brew_update_secs_ago: Option<u64>,
     pub brewery_latest_version: Option<String>,
@@ -34,26 +32,29 @@ pub struct StatusMessage {
     pub result: anyhow::Result<StatusSnapshot>,
 }
 
-pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
+/// `known_leaves` is the leaf set the app has already loaded, used to keep the
+/// outdated list to packages the user asked for. Only the first status check —
+/// which races the initial load — has to ask `brew` for it again.
+pub async fn fetch_status(known_leaves: Option<Vec<String>>) -> anyhow::Result<StatusSnapshot> {
     let mut status = StatusSnapshot::default();
 
-    // Run independent commands in parallel (version, info, leaves, doctor, repo paths)
+    // Every one of these is an independent `brew` invocation costing hundreds of
+    // milliseconds, so the whole set runs at once and the snapshot lands at the
+    // cost of the slowest rather than their sum.
     let (
         version_result,
-        info_result,
-        leaves_result,
-        doctor_result,
+        leaf_set,
         brew_repo_result,
         core_repo_result,
+        outdated_result,
         services_result,
         latest_brewery_version,
     ) = tokio::join!(
         run_brew_command(&["--version"]),
-        run_brew_command(&["info"]),
-        run_brew_command(&["leaves"]),
-        run_brew_command(&["doctor"]),
+        fetch_leaf_set(known_leaves),
         run_brew_command(&["--repository"]),
         run_brew_command(&["--repository", "homebrew/core"]),
+        run_brew_command(&["outdated", "--formula"]),
         fetch_services(),
         fetch_latest_brewery_version_cached(),
     );
@@ -68,37 +69,6 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty());
         status.brew_version = lines.next().map(str::to_string);
-    }
-
-    // Process info result
-    if let Ok(result) = info_result
-        && result.success
-    {
-        status.brew_info = result
-            .stdout
-            .lines()
-            .map(|s| s.trim())
-            .find(|line| !line.is_empty())
-            .map(str::to_string);
-    }
-
-    // Process doctor result
-    if let Ok(result) = doctor_result {
-        status.doctor_ok = Some(result.success);
-        if !result.success {
-            // Parse warnings/errors from stderr or stdout
-            let output = if result.stderr.is_empty() {
-                &result.stdout
-            } else {
-                &result.stderr
-            };
-            status.doctor_issues = output
-                .lines()
-                .filter(|line| line.starts_with("Warning:") || line.starts_with("Error:"))
-                .take(5)
-                .map(|s| s.to_string())
-                .collect();
-        }
     }
 
     // Process last brew update time from repository metadata
@@ -131,24 +101,8 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
         status.services = services;
     }
 
-    // Build leaf set from leaves result
-    let leaf_set: HashSet<String> = match leaves_result {
-        Ok(result) => result
-            .stdout
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|s| s.trim().to_string())
-            .collect(),
-        Err(_) => HashSet::new(),
-    };
-
-    // Now fetch outdated (this depends on having leaf_set ready for filtering)
-    if let Ok(result) = run_brew_command(&["outdated", "--formula"]).await {
-        let packages: Vec<String> = result
-            .stdout
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|s| s.trim().to_string())
+    if let Ok(result) = outdated_result {
+        let packages: Vec<String> = bare_formula_names(&result.stdout)
             .filter(|name| leaf_set.contains(name))
             .collect();
         status.outdated_count = Some(packages.len());
@@ -156,6 +110,29 @@ pub async fn fetch_status() -> anyhow::Result<StatusSnapshot> {
     }
 
     Ok(status)
+}
+
+/// Leaves the app already has, or a fresh `brew leaves` when it has none yet.
+async fn fetch_leaf_set(known: Option<Vec<String>>) -> HashSet<String> {
+    if let Some(leaves) = known.filter(|leaves| !leaves.is_empty()) {
+        return leaves.into_iter().collect();
+    }
+
+    match run_brew_command(&["leaves"]).await {
+        Ok(result) if result.success => bare_formula_names(&result.stdout).collect(),
+        _ => HashSet::new(),
+    }
+}
+
+/// Formula names as the rest of the app spells them: bare, never tap-qualified.
+/// `brew leaves` and `brew outdated` both print `org/tap/pkg` for tap installs,
+/// and the two sets are compared against each other and against the list panel.
+fn bare_formula_names(stdout: &str) -> impl Iterator<Item = String> + '_ {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(short_name)
 }
 
 fn first_nonempty_line(text: &str) -> Option<&str> {

@@ -156,6 +156,20 @@ impl App {
         self.needs_redraw = true;
     }
 
+    pub fn apply_doctor_message(&mut self, message: DoctorMessage) {
+        match message.result {
+            Ok(report) => self.doctor = Some(report),
+            // A failed doctor run is not worth taking over the status line the
+            // way a failed status check is; the tab says so instead.
+            Err(_) => self.doctor = None,
+        }
+
+        self.pending_doctor = false;
+        let max_scroll = self.max_status_scroll();
+        self.status_scroll_offset = self.status_scroll_offset.min(max_scroll);
+        self.needs_redraw = true;
+    }
+
     pub fn apply_command_message(&mut self, message: CommandMessage) {
         let mut toast: Option<(ToastLevel, String)> = None;
         let command_duration_secs = self

@@ -5,6 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::app::{App, StatusTab, ToastLevel};
 use crate::brew::{CommandKind, StatusSnapshot};
+use crate::format::format_size;
 use crate::ui::util::symbol;
 
 type StatusLine = (String, Color);
@@ -121,7 +122,7 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
 fn build_tab_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine> {
     match app.status_tab {
         StatusTab::Activity => build_activity_items(app, system_status),
-        StatusTab::Issues => build_issues_items(app, system_status),
+        StatusTab::Issues => build_issues_items(app),
         StatusTab::Outdated => build_outdated_items(app, system_status),
         StatusTab::Services => build_services_items(app, system_status),
         StatusTab::History => build_history_items(app),
@@ -144,17 +145,32 @@ fn build_outdated_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
         .collect()
 }
 
-fn build_issues_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine> {
+fn build_issues_items(app: &App) -> Vec<StatusLine> {
     let theme = &app.theme;
-    if system_status.doctor_issues.is_empty() {
+
+    let Some(report) = app.doctor.as_ref() else {
+        // The doctor run outlives the rest of the status check, so this tab is
+        // the one place where the wait is visible.
+        let message = if app.pending_doctor {
+            "Running brew doctor..."
+        } else {
+            "brew doctor could not be run"
+        };
+        return vec![(
+            format!("{} {message}", symbol(app, "·", "-")),
+            theme.text_muted,
+        )];
+    };
+
+    if report.issues.is_empty() {
         return vec![(
             format!("{} No issues found", symbol(app, "✓", "ok")),
             theme.green,
         )];
     }
 
-    system_status
-        .doctor_issues
+    report
+        .issues
         .iter()
         .map(|issue| (issue.clone(), theme.yellow))
         .collect()
@@ -408,18 +424,34 @@ fn build_recent_completion_items(app: &App) -> Option<Vec<StatusLine>> {
     Some(vec![(format!("{verb} completed: {pkg}"), theme.green)])
 }
 
+/// The install summary that used to come from `brew info` — a 1.2s subprocess
+/// for a single line of text. Every number in it is already on hand from the
+/// Cellar scan and the size pass, so it costs nothing to build here.
+fn installed_summary(app: &App) -> String {
+    let formulae = app.all_formulae.len();
+    let casks = app.casks.len();
+    let total_kb: u64 = app.sizes.iter().map(|entry| entry.size_kb).sum();
+
+    if total_kb == 0 {
+        return format!("{formulae} formulae, {casks} casks");
+    }
+
+    format!(
+        "{formulae} formulae, {casks} casks, {}",
+        format_size(total_kb)
+    )
+}
+
 fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec<StatusLine> {
     let theme = &app.theme;
     let mut items = Vec::new();
 
     if let Some(ver) = &system_status.brew_version {
         let sep = symbol(app, "·", "|");
-        let info = system_status
-            .brew_info
-            .as_ref()
-            .map(|value| format!(" {sep} {value}"))
-            .unwrap_or_default();
-        items.push((format!("Version: {ver}{info}"), theme.text_primary));
+        items.push((
+            format!("Version: {ver} {sep} {}", installed_summary(app)),
+            theme.text_primary,
+        ));
     }
 
     if system_status.brewery_update_available
@@ -428,12 +460,13 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         items.push((format!("Brewery update: v{latest} available"), theme.orange));
     }
 
-    let doctor_status = match system_status.doctor_ok {
-        Some(true) => (symbol(app, "✓ Healthy", "ok Healthy"), theme.green),
-        Some(false) => (
+    let doctor_status = match app.doctor.as_ref() {
+        Some(report) if report.ok => (symbol(app, "✓ Healthy", "ok Healthy"), theme.green),
+        Some(_) => (
             symbol(app, "⚠ Issues found", "! Issues found"),
             theme.yellow,
         ),
+        None if app.pending_doctor => ("Checking...", theme.text_muted),
         None => ("? Unknown", theme.text_muted),
     };
     items.push((format!("Doctor: {}", doctor_status.0), doctor_status.1));
