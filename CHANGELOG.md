@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-03
+
+### Added
+- Autoremove preview: `a` now arms a confirmation that reports how many formulae `brew autoremove` would delete and the disk it frees, with the full list shown in Details; it declines to run at all when there is nothing to remove
+- Outdated tab shows the version jump each upgrade makes (`1.4.6 → 1.4.7`), covers casks as well as formulae, and tags pinned entries
+- Outdated markers on casks in the installed list, and an "upgrade available" note on the Latest line in Details
+- Pin and unpin the selected formula via `p`; pinned formulae are marked in the list, explained in Details, and counted in the Activity tab
+- `brew update` in-app via `e`, with the Activity tab pointing at it whenever an update is recommended
+- Install date in Details, read from the keg's install receipt, so provenance reads "installed on request · 3 months ago"
+- Sort the formula list by name, disk size, or install date via `Shift+O`, re-sorting automatically when sizes or receipts finish loading
+- Open the selected package's homepage in the browser via `g`
+- Orphan count and reclaimable size in the Activity tab, once the dependency graph has loaded
+
+### Changed
+- Outdated data comes from `brew outdated --json=v2` rather than the plain formula listing, at the same cost
+- Status check also runs `brew list --pinned`
+
 ## [0.6.0] - 2026-08-09
 
 ### Added

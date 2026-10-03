@@ -7,8 +7,8 @@ mod types;
 
 pub use types::{
     CommandHistoryEntry, FocusedPanel, IconMode, InputMode, PackageAction, PackageKind,
-    PendingPackageAction, PendingServiceAction, ServiceAction, ServiceKindFilter, StatusTab, Toast,
-    ToastLevel, ViewMode,
+    PendingPackageAction, PendingServiceAction, ServiceAction, ServiceKindFilter, SortMode,
+    StatusTab, Toast, ToastLevel, ViewMode,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -22,7 +22,7 @@ use crate::brew::{
     DetailsMessage, DoctorMessage, DoctorReport, GraphMessage, LeavesMessage, SizeEntry,
     SizesMessage, StatusMessage, StatusSnapshot, fetch_casks, fetch_dependency_graph,
     fetch_details_basic, fetch_details_full, fetch_doctor, fetch_leaves, fetch_sizes, fetch_status,
-    run_brew_command, run_command,
+    run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -51,10 +51,15 @@ pub struct App {
     /// interesting.
     pub all_formulae: Vec<String>,
     pub leaves_only: bool,
+    pub sort_mode: SortMode,
     pub casks: Vec<String>,
     pub filtered_leaves: Vec<usize>,
     pub filtered_casks: Vec<usize>,
+    /// Every outdated formula, whichever scope is showing.
     pub outdated_leaves: HashSet<String>,
+    pub outdated_casks: HashSet<String>,
+    /// Formulae held back from `brew upgrade` via `brew pin`.
+    pub pinned: HashSet<String>,
     pub filtered_leaves_dirty: bool,
     pub package_results_selected: Option<usize>,
     pub last_package_search: Option<String>,
@@ -82,6 +87,7 @@ pub struct App {
     pub pending_package_action: Option<PendingPackageAction>,
     pub pending_service_action: Option<PendingServiceAction>,
     pub pending_upgrade_all_outdated: bool,
+    pub pending_autoremove: bool,
     pub pending_self_update: bool,
     pub command_history: VecDeque<CommandHistoryEntry>,
     pub last_command_args: Vec<String>,

@@ -7,6 +7,10 @@ pub enum CommandKind {
     Uninstall,
     Upgrade,
     UpgradeAll,
+    Pin,
+    Unpin,
+    Update,
+    OpenHomepage,
     ServiceStart,
     ServiceStop,
     ServiceRestart,
@@ -25,6 +29,10 @@ impl CommandKind {
             Self::Uninstall => "uninstall",
             Self::Upgrade => "upgrade",
             Self::UpgradeAll => "upgrade-all",
+            Self::Pin => "pin",
+            Self::Unpin => "unpin",
+            Self::Update => "update",
+            Self::OpenHomepage => "open homepage",
             Self::ServiceStart => "services start",
             Self::ServiceStop => "services stop",
             Self::ServiceRestart => "services restart",
@@ -40,6 +48,23 @@ impl CommandKind {
         matches!(self, Self::Install | Self::Uninstall | Self::Upgrade)
     }
 
+    /// The executable behind the command. Everything is `brew` except the
+    /// self-update, which goes through Cargo, and opening a homepage, which is
+    /// handed to the desktop.
+    pub fn binary(self) -> &'static str {
+        match self {
+            Self::SelfUpdate => "cargo",
+            Self::OpenHomepage => {
+                if cfg!(target_os = "macos") {
+                    "open"
+                } else {
+                    "xdg-open"
+                }
+            }
+            _ => "brew",
+        }
+    }
+
     pub fn is_service_action(self) -> bool {
         matches!(
             self,
@@ -48,7 +73,12 @@ impl CommandKind {
     }
 
     pub fn has_named_target(self) -> bool {
-        self.is_package_action() || self.is_service_action() || matches!(self, Self::ServiceInfo)
+        self.is_package_action()
+            || self.is_service_action()
+            || matches!(
+                self,
+                Self::ServiceInfo | Self::Pin | Self::Unpin | Self::OpenHomepage
+            )
     }
 
     pub fn is_activity_command(self) -> bool {
@@ -58,6 +88,9 @@ impl CommandKind {
                 | Self::Uninstall
                 | Self::Upgrade
                 | Self::UpgradeAll
+                | Self::Pin
+                | Self::Unpin
+                | Self::Update
                 | Self::ServiceStart
                 | Self::ServiceStop
                 | Self::ServiceRestart
@@ -78,8 +111,12 @@ impl CommandKind {
         )
     }
 
+    /// Pinning and `brew update` change what `brew outdated` reports without
+    /// touching any keg, so they refresh status but not the lists.
     pub fn refreshes_status_on_success(self) -> bool {
-        self.refreshes_lists_on_success() || self.is_service_action()
+        self.refreshes_lists_on_success()
+            || self.is_service_action()
+            || matches!(self, Self::Pin | Self::Unpin | Self::Update)
     }
 
     pub fn action_title(self) -> &'static str {
@@ -87,6 +124,9 @@ impl CommandKind {
             Self::Install => "Install",
             Self::Uninstall => "Uninstall",
             Self::Upgrade => "Upgrade",
+            Self::Pin => "Pin",
+            Self::Unpin => "Unpin",
+            Self::OpenHomepage => "Open homepage",
             Self::ServiceStart => "Start service",
             Self::ServiceStop => "Stop service",
             Self::ServiceRestart => "Restart service",
@@ -163,5 +203,30 @@ mod tests {
         assert!(CommandKind::ServiceStart.refreshes_status_on_success());
         assert!(CommandKind::ServiceStop.refreshes_status_on_success());
         assert!(CommandKind::ServiceRestart.refreshes_status_on_success());
+    }
+
+    /// Pinning and updating change the outdated set without adding or
+    /// removing a keg, so the lists can stay put while status re-checks.
+    #[test]
+    fn pin_and_update_refresh_status_but_not_lists() {
+        for kind in [CommandKind::Pin, CommandKind::Unpin, CommandKind::Update] {
+            assert!(
+                kind.refreshes_status_on_success(),
+                "{kind} should refresh status"
+            );
+            assert!(
+                !kind.refreshes_lists_on_success(),
+                "{kind} should not refresh lists"
+            );
+        }
+        assert!(!CommandKind::OpenHomepage.refreshes_status_on_success());
+    }
+
+    #[test]
+    fn picks_the_binary_for_each_command() {
+        assert_eq!(CommandKind::SelfUpdate.binary(), "cargo");
+        assert_eq!(CommandKind::Install.binary(), "brew");
+        assert_eq!(CommandKind::Update.binary(), "brew");
+        assert_ne!(CommandKind::OpenHomepage.binary(), "brew");
     }
 }

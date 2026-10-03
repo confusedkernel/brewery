@@ -60,6 +60,37 @@ impl App {
         })
     }
 
+    /// What `brew autoremove` would remove right now, and how much disk that
+    /// frees. `None` while the graph is still loading.
+    pub fn autoremove_impact(&self) -> Option<ImpactSummary> {
+        let graph = self.dependency_graph.as_ref()?;
+        let orphaned = graph.orphans();
+        let freed_kb = self.total_size_kb(orphaned.iter().map(String::as_str));
+
+        Some(ImpactSummary { orphaned, freed_kb })
+    }
+
+    /// `12 orphans (~263.1M)`, for the autoremove prompt and the Activity tab.
+    pub fn autoremove_hint(&self) -> Option<String> {
+        let impact = self.autoremove_impact()?;
+        if impact.is_empty() {
+            return None;
+        }
+
+        let count = impact.orphaned.len();
+        let noun = if count == 1 { "orphan" } else { "orphans" };
+        Some(match impact.freed_kb {
+            Some(kb) => format!("{count} {noun} (~{})", crate::format::format_size(kb)),
+            None => format!("{count} {noun}"),
+        })
+    }
+
+    /// When `pkg` was installed, as seconds since the epoch. `None` for casks,
+    /// for receipts without a timestamp, and until the graph loads.
+    pub fn installed_at(&self, pkg: &str) -> Option<u64> {
+        self.dependency_graph.as_ref()?.installed_at(pkg)
+    }
+
     fn total_size_kb<'a>(&self, names: impl Iterator<Item = &'a str>) -> Option<u64> {
         if self.sizes.is_empty() {
             return None;

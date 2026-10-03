@@ -3,7 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 
-use crate::app::{App, InputMode};
+use crate::app::{App, InputMode, SortMode};
 use crate::ui::util::symbol;
 
 pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
@@ -33,7 +33,14 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
             casks
                 .iter()
                 .filter_map(|idx| app.casks.get(*idx))
-                .map(|item| styled_item(format!(" {item}"), theme.text_primary))
+                .map(|item| {
+                    let marker = if app.is_outdated_cask(item.as_str()) {
+                        format!("{} ", symbol(app, "↑", "^"))
+                    } else {
+                        String::new()
+                    };
+                    styled_item(format!(" {marker}{item}"), theme.text_primary)
+                })
                 .collect()
         };
         let selected = app
@@ -52,7 +59,16 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         } else {
             "Formulae"
         };
-        let title = format!(" {scope} ({}){}", leaves.len(), filter_suffix);
+        let sort_suffix = match app.sort_mode {
+            SortMode::Name => String::new(),
+            mode => format!(" {} by {}", symbol(app, "·", "|"), mode.label()),
+        };
+        let title = format!(
+            " {scope} ({}){}{}",
+            leaves.len(),
+            filter_suffix,
+            sort_suffix
+        );
         let rows = if leaves.is_empty() {
             let empty_label = if app.leaves_outdated_only {
                 if app.system_status.is_some() {
@@ -69,11 +85,15 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
                 .iter()
                 .filter_map(|idx| app.leaves.get(*idx))
                 .map(|item| {
-                    let marker = if app.is_outdated_leaf(item.as_str()) {
-                        format!("{} ", symbol(app, "↑", "^"))
-                    } else {
-                        String::new()
-                    };
+                    let mut marker = String::new();
+                    if app.is_outdated_leaf(item.as_str()) {
+                        marker.push_str(symbol(app, "↑", "^"));
+                        marker.push(' ');
+                    }
+                    if app.is_pinned(item.as_str()) {
+                        marker.push_str(symbol(app, "", "*"));
+                        marker.push(' ');
+                    }
                     styled_item(format!(" {marker}{item}"), theme.text_primary)
                 })
                 .collect()

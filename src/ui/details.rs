@@ -3,15 +3,19 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use crate::app::{App, InputMode, PackageAction, StatusTab, ViewMode};
 use crate::brew::Origin;
-use crate::format::format_size;
+use crate::format::{format_age, format_date, format_size};
 use crate::ui::util::symbol;
 
 pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let details_lines = if matches!(
+    let details_lines = if app.pending_autoremove {
+        build_autoremove_preview_lines(app)
+    } else if matches!(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
     ) {
@@ -110,6 +114,7 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
     )));
 
     lines.extend(build_origin_lines(app, pkg));
+    lines.extend(build_pinned_lines(app, pkg));
     lines.extend(build_removal_impact_lines(app, pkg));
 
     if let Some(details) = app.details_cache.peek(pkg) {
@@ -158,10 +163,25 @@ fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
         )));
 
         if let Some(latest) = details.latest.as_ref() {
-            lines.push(Line::from(Span::styled(
-                format!("  Latest: {latest}"),
-                Style::default().fg(theme.text_secondary),
-            )));
+            let is_outdated = if details.artifacts.is_some() {
+                app.is_outdated_cask(pkg)
+            } else {
+                app.is_outdated_leaf(pkg)
+            };
+            if is_outdated {
+                lines.push(Line::from(Span::styled(
+                    format!(
+                        "  Latest: {latest} {} upgrade available (U)",
+                        symbol(app, "↑", "^")
+                    ),
+                    Style::default().fg(theme.orange),
+                )));
+            } else {
+                lines.push(Line::from(Span::styled(
+                    format!("  Latest: {latest}"),
+                    Style::default().fg(theme.text_secondary),
+                )));
+            }
         }
 
         if let Some(artifacts) = details.artifacts.as_ref() {
@@ -295,6 +315,91 @@ fn build_origin_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
         }
         Origin::Unknown => {}
     }
+
+    if let Some(installed_at) = app.installed_at(pkg) {
+        lines.push(Line::from(Span::styled(
+            format!("    installed {}", describe_install_time(installed_at)),
+            Style::default().fg(theme.text_muted),
+        )));
+    }
+
+    lines
+}
+
+/// `2026-06-11 (3 months ago)`, or just the date if the clock is somehow
+/// behind the receipt.
+fn describe_install_time(installed_at: u64) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let date = format_date(installed_at);
+    match now.checked_sub(installed_at) {
+        Some(age) => format!("{date} ({})", format_age(age)),
+        None => date,
+    }
+}
+
+/// A pinned formula is skipped by `brew upgrade`, which is easy to forget
+/// when the Outdated tab keeps listing it.
+fn build_pinned_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    if !app.is_pinned(pkg) {
+        return Vec::new();
+    }
+
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("  {} Pinned", symbol(app, "", "*")),
+            Style::default().fg(theme.yellow),
+        )),
+        Line::from(Span::styled(
+            "    brew upgrade skips it; press p to unpin".to_string(),
+            Style::default().fg(theme.text_muted),
+        )),
+    ]
+}
+
+/// Everything `brew autoremove` is about to delete, shown while its
+/// confirmation is armed. The prompt has the count; this has the names.
+fn build_autoremove_preview_lines(app: &App) -> Vec<Line<'static>> {
+    let theme = &app.theme;
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Autoremove preview".to_string(),
+            Style::default()
+                .fg(theme.accent_secondary)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    let Some(impact) = app.autoremove_impact() else {
+        lines.push(Line::from(Span::styled(
+            "  Dependency graph still loading; confirm to run anyway".to_string(),
+            Style::default().fg(theme.text_muted),
+        )));
+        return lines;
+    };
+
+    let freed = impact
+        .freed_kb
+        .map(|kb| format!(" (~{} freed)", format_size(kb)))
+        .unwrap_or_default();
+    let count = impact.orphaned.len();
+    let noun = if count == 1 { "formula" } else { "formulae" };
+    lines.push(Line::from(Span::styled(
+        format!("  Removes {count} {noun} nothing requested needs{freed}"),
+        Style::default().fg(theme.orange),
+    )));
+    lines.extend(format_list_multiline(app, &impact.orphaned, theme, "    "));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  [a] confirm, [Esc] cancel".to_string(),
+        Style::default().fg(theme.text_secondary),
+    )));
 
     lines
 }
@@ -591,6 +696,7 @@ mod tests {
                     on_request: true,
                     direct: vec!["libpng".to_string()],
                     runtime: vec!["libpng".to_string(), "zlib".to_string()],
+                    installed_at: None,
                 },
             ),
             (
@@ -599,6 +705,7 @@ mod tests {
                     on_request: false,
                     direct: vec!["zlib".to_string()],
                     runtime: vec!["zlib".to_string()],
+                    installed_at: None,
                 },
             ),
             ("zlib".to_string(), FormulaReceipt::default()),
@@ -658,6 +765,71 @@ mod tests {
         let rendered = text(&build_removal_impact_lines(&app, "imagemagick"));
         assert!(rendered.contains("orphans 2"), "got:\n{rendered}");
         assert!(rendered.contains("libpng") && rendered.contains("zlib"));
+    }
+
+    #[test]
+    fn previews_the_autoremove_set_with_its_size() {
+        let mut app = app_with_graph();
+        app.dependency_graph = Some(DependencyGraph::new(Receipts::from([
+            (
+                "kept".to_string(),
+                FormulaReceipt {
+                    on_request: true,
+                    ..FormulaReceipt::default()
+                },
+            ),
+            ("stale".to_string(), FormulaReceipt::default()),
+        ])));
+        app.sizes = vec![crate::brew::SizeEntry {
+            name: "stale".to_string(),
+            size_kb: 2048,
+        }];
+
+        let rendered = text(&build_autoremove_preview_lines(&app));
+        assert!(rendered.contains("Removes 1 formula"), "got:\n{rendered}");
+        assert!(rendered.contains("stale"));
+        assert!(rendered.contains("2.0M"));
+    }
+
+    #[test]
+    fn autoremove_preview_admits_when_the_graph_is_missing() {
+        let app = App::new();
+        let rendered = text(&build_autoremove_preview_lines(&app));
+        assert!(rendered.contains("still loading"));
+    }
+
+    #[test]
+    fn mentions_pinning_only_for_pinned_formulae() {
+        let mut app = app_with_graph();
+        assert!(build_pinned_lines(&app, "imagemagick").is_empty());
+
+        app.pinned.insert("imagemagick".to_string());
+        let rendered = text(&build_pinned_lines(&app, "imagemagick"));
+        assert!(rendered.contains("Pinned"));
+        assert!(rendered.contains("unpin"));
+    }
+
+    #[test]
+    fn shows_the_install_date_when_the_receipt_has_one() {
+        let mut app = app_with_graph();
+        assert!(
+            !text(&build_origin_lines(&app, "imagemagick")).contains("installed "),
+            "no timestamp, no date line"
+        );
+
+        app.dependency_graph = Some(DependencyGraph::new(Receipts::from([(
+            "imagemagick".to_string(),
+            FormulaReceipt {
+                on_request: true,
+                installed_at: Some(1_770_570_764),
+                ..FormulaReceipt::default()
+            },
+        )])));
+        let rendered = text(&build_origin_lines(&app, "imagemagick"));
+        assert!(
+            rendered.contains("installed 2026-02-08"),
+            "got:\n{rendered}"
+        );
     }
 
     #[test]

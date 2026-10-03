@@ -105,6 +105,7 @@ pub static SECTIONS: &[Section] = &[
                 "Toggle leaves / all installed formulae",
                 KeyCode::Char('L'),
             ),
+            key("O", "Cycle sort: name / size / recent", KeyCode::Char('O')),
         ],
     },
     Section {
@@ -119,6 +120,8 @@ pub static SECTIONS: &[Section] = &[
                 "Upgrade selected or all outdated (confirm)",
                 KeyCode::Char('U'),
             ),
+            key("p", "Pin / unpin selected formula", KeyCode::Char('p')),
+            key("g", "Open homepage in browser", KeyCode::Char('g')),
             key(
                 "P",
                 "Update Brewery via cargo (confirm)",
@@ -148,6 +151,7 @@ pub static SECTIONS: &[Section] = &[
             key("r", "Refresh formulae + casks", KeyCode::Char('r')),
             key("s", "Load sizes", KeyCode::Char('s')),
             key("h", "Status check", KeyCode::Char('h')),
+            key("e", "Run brew update", KeyCode::Char('e')),
         ],
     },
     Section {
@@ -162,7 +166,7 @@ pub static SECTIONS: &[Section] = &[
                 KeyModifiers::ALT,
             ),
             key("c", "Cleanup", KeyCode::Char('c')),
-            key("a", "Autoremove", KeyCode::Char('a')),
+            key("a", "Autoremove (confirm)", KeyCode::Char('a')),
             key("b", "Bundle dump", KeyCode::Char('b')),
             key("v", "Toggle view", KeyCode::Char('v')),
             key("q", "Quit", KeyCode::Char('q')),

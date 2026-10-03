@@ -1,3 +1,6 @@
+use std::cmp::Ordering;
+use std::collections::HashMap;
+
 use super::*;
 use crate::brew::ServiceEntry;
 
@@ -8,6 +11,14 @@ impl App {
 
     pub fn is_outdated_leaf(&self, pkg: &str) -> bool {
         self.outdated_leaves.contains(pkg)
+    }
+
+    pub fn is_outdated_cask(&self, cask: &str) -> bool {
+        self.outdated_casks.contains(cask)
+    }
+
+    pub fn is_pinned(&self, pkg: &str) -> bool {
+        self.pinned.contains(pkg)
     }
 
     /// Rebuilds the displayed formula list from the active scope, keeping the
@@ -21,6 +32,7 @@ impl App {
         } else {
             self.all_formulae.clone()
         };
+        self.sort_leaves();
 
         // The old index means something different in the new scope, and would
         // otherwise survive reconciliation while pointing at an unrelated
@@ -33,6 +45,43 @@ impl App {
             && self.filtered_leaves.contains(&index)
         {
             self.selected_index = Some(index);
+        }
+    }
+
+    /// Orders `leaves` by the active sort. Name order is what the fetch
+    /// already delivers; the other modes fall back to it for ties and for
+    /// entries the sizes or receipts know nothing about, so the list is
+    /// stable while that data is still on its way.
+    fn sort_leaves(&mut self) {
+        match self.sort_mode {
+            SortMode::Name => {}
+            SortMode::Size => {
+                let sizes: HashMap<&str, u64> = self
+                    .sizes
+                    .iter()
+                    .map(|entry| (entry.name.as_str(), entry.size_kb))
+                    .collect();
+                self.leaves.sort_by(|left, right| {
+                    let left_size = sizes.get(left.as_str());
+                    let right_size = sizes.get(right.as_str());
+                    descending_then_name(left_size, right_size, left, right)
+                });
+            }
+            SortMode::Recent => {
+                let graph = self.dependency_graph.as_ref();
+                self.leaves.sort_by(|left, right| {
+                    let left_at = graph.and_then(|graph| graph.installed_at(left));
+                    let right_at = graph.and_then(|graph| graph.installed_at(right));
+                    descending_then_name(left_at.as_ref(), right_at.as_ref(), left, right)
+                });
+            }
+        }
+    }
+
+    /// Re-sorts the list when the data a non-name sort depends on arrives.
+    pub fn resync_sorted_list(&mut self) {
+        if self.sort_mode != SortMode::Name {
+            self.sync_installed_list();
         }
     }
 
@@ -347,6 +396,21 @@ enum StepDirection {
     Prev,
 }
 
+/// Larger keys first; missing keys after every present one; names break ties.
+fn descending_then_name<K: Ord>(
+    left_key: Option<&K>,
+    right_key: Option<&K>,
+    left_name: &str,
+    right_name: &str,
+) -> Ordering {
+    match (left_key, right_key) {
+        (Some(left), Some(right)) => right.cmp(left).then_with(|| left_name.cmp(right_name)),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => left_name.cmp(right_name),
+    }
+}
+
 fn build_filtered_indices<F>(items: &[String], query: &str, mut include: F) -> Vec<usize>
 where
     F: FnMut(&str) -> bool,
@@ -439,7 +503,8 @@ fn contains_ascii_case_insensitive(haystack: &[u8], needle: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, PackageKind, contains_ascii_case_insensitive, leaf_matches_query};
+    use super::{App, PackageKind, SortMode, contains_ascii_case_insensitive, leaf_matches_query};
+    use crate::brew::{DependencyGraph, FormulaReceipt, Receipts, SizeEntry};
 
     /// Two leaves, plus the dependencies they pulled in.
     fn app_with_both_scopes() -> App {
@@ -538,6 +603,96 @@ mod tests {
             .filter_map(|idx| app.leaves.get(*idx))
             .collect();
         assert_eq!(matches, ["libpng"]);
+    }
+
+    fn size(name: &str, size_kb: u64) -> SizeEntry {
+        SizeEntry {
+            name: name.to_string(),
+            size_kb,
+        }
+    }
+
+    #[test]
+    fn sorts_by_size_with_unsized_entries_trailing_by_name() {
+        let mut app = app_with_both_scopes();
+        app.toggle_leaves_scope();
+        app.sizes = vec![size("libpng", 300), size("imagemagick", 900)];
+
+        app.cycle_sort_mode();
+
+        assert_eq!(app.sort_mode, SortMode::Size);
+        assert_eq!(app.leaves, ["imagemagick", "libpng", "wget", "zlib"]);
+    }
+
+    #[test]
+    fn sorts_by_install_date_newest_first() {
+        let receipt = |at: u64| FormulaReceipt {
+            installed_at: Some(at),
+            ..FormulaReceipt::default()
+        };
+        let receipts = Receipts::from([
+            ("imagemagick".to_string(), receipt(100)),
+            ("wget".to_string(), receipt(300)),
+            ("zlib".to_string(), receipt(200)),
+        ]);
+
+        let mut app = app_with_both_scopes();
+        app.toggle_leaves_scope();
+        app.dependency_graph = Some(DependencyGraph::new(receipts));
+        app.sort_mode = SortMode::Size;
+
+        app.cycle_sort_mode();
+
+        assert_eq!(app.sort_mode, SortMode::Recent);
+        assert_eq!(
+            app.leaves,
+            ["wget", "zlib", "imagemagick", "libpng"],
+            "libpng has no receipt, so it trails"
+        );
+    }
+
+    #[test]
+    fn keeps_the_selection_across_a_sort_change() {
+        let mut app = app_with_both_scopes();
+        app.sizes = vec![size("wget", 900), size("imagemagick", 100)];
+        app.selected_index = Some(1); // wget
+        app.cycle_sort_mode();
+
+        assert_eq!(app.leaves, ["wget", "imagemagick"]);
+        assert_eq!(app.selected_leaf(), Some("wget"));
+    }
+
+    #[test]
+    fn re_sorts_when_sizes_arrive_after_the_sort_was_chosen() {
+        let mut app = app_with_both_scopes();
+        app.cycle_sort_mode();
+        assert_eq!(app.leaves, ["imagemagick", "wget"], "no sizes yet");
+
+        app.sizes = vec![size("wget", 900), size("imagemagick", 100)];
+        app.resync_sorted_list();
+        assert_eq!(app.leaves, ["wget", "imagemagick"]);
+    }
+
+    #[test]
+    fn cycles_back_to_name_order() {
+        let mut app = app_with_both_scopes();
+        app.sizes = vec![size("wget", 900), size("imagemagick", 100)];
+        app.cycle_sort_mode();
+        app.cycle_sort_mode();
+        app.cycle_sort_mode();
+
+        assert_eq!(app.sort_mode, SortMode::Name);
+        assert_eq!(app.leaves, ["imagemagick", "wget"]);
+    }
+
+    #[test]
+    fn refuses_to_sort_in_cask_mode() {
+        let mut app = app_with_both_scopes();
+        app.active_package_kind = PackageKind::Cask;
+        app.cycle_sort_mode();
+
+        assert_eq!(app.sort_mode, SortMode::Name);
+        assert!(app.status.contains("formulae"));
     }
 
     #[test]

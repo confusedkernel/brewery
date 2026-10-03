@@ -27,6 +27,9 @@ pub struct FormulaReceipt {
     pub direct: Vec<String>,
     /// The full runtime closure as installed, used for orphan analysis.
     pub runtime: Vec<String>,
+    /// When the newest keg was poured, as seconds since the Unix epoch.
+    /// Answers "how long has this been here?" without a `brew` call.
+    pub installed_at: Option<u64>,
 }
 
 pub type Receipts = HashMap<String, FormulaReceipt>;
@@ -110,6 +113,19 @@ impl DependencyGraph {
 
     pub fn direct_dependents(&self, pkg: &str) -> &[String] {
         self.dependents.get(pkg).map_or(&[], Vec::as_slice)
+    }
+
+    /// When `pkg`'s newest keg was installed, if its receipt says.
+    pub fn installed_at(&self, pkg: &str) -> Option<u64> {
+        self.receipts.get(pkg)?.installed_at
+    }
+
+    /// Formulae `brew autoremove` would remove right now, sorted. This is the
+    /// same set the uninstall preview treats as pre-existing garbage.
+    pub fn orphans(&self) -> Vec<String> {
+        let mut orphans: Vec<String> = self.already_orphaned.iter().cloned().collect();
+        orphans.sort();
+        orphans
     }
 
     /// Why `pkg` is installed, as a chain up to an explicitly installed
@@ -246,6 +262,8 @@ struct InstallReceipt {
     installed_on_request: bool,
     #[serde(default)]
     runtime_dependencies: Vec<RuntimeDependency>,
+    /// Seconds since the epoch at which the keg was installed.
+    time: Option<u64>,
 }
 
 #[derive(serde::Deserialize)]
@@ -313,6 +331,12 @@ fn read_receipts(cellar: &Path) -> anyhow::Result<Receipts> {
                 slot.direct = direct;
                 slot.runtime = runtime;
             }
+            // Several kegs means several installs; the newest one is the one
+            // whose age the user cares about.
+            slot.installed_at = match (slot.installed_at, receipt.time) {
+                (Some(existing), Some(incoming)) => Some(existing.max(incoming)),
+                (existing, incoming) => existing.or(incoming),
+            };
         }
 
         if let Some(receipt) = merged {
@@ -361,6 +385,7 @@ mod tests {
                         on_request: *on_request,
                         direct: deps.iter().map(|dep| dep.to_string()).collect(),
                         runtime,
+                        installed_at: None,
                     },
                 )
             })
@@ -493,6 +518,38 @@ mod tests {
     }
 
     #[test]
+    fn lists_current_orphans_sorted() {
+        let graph = graph(&[
+            ("kept", true, &[]),
+            ("zeta", false, &[]),
+            ("alpha", false, &[]),
+        ]);
+
+        assert_eq!(graph.orphans(), ["alpha", "zeta"]);
+        assert!(sample().orphans().is_empty());
+    }
+
+    #[test]
+    fn reports_install_time_only_when_the_receipt_has_one() {
+        let receipts = Receipts::from([
+            (
+                "dated".to_string(),
+                FormulaReceipt {
+                    on_request: true,
+                    installed_at: Some(1_700_000_000),
+                    ..FormulaReceipt::default()
+                },
+            ),
+            ("undated".to_string(), FormulaReceipt::default()),
+        ]);
+        let graph = DependencyGraph::new(receipts);
+
+        assert_eq!(graph.installed_at("dated"), Some(1_700_000_000));
+        assert_eq!(graph.installed_at("undated"), None);
+        assert_eq!(graph.installed_at("missing"), None);
+    }
+
+    #[test]
     fn cascades_through_a_chain_of_exclusive_dependencies() {
         let graph = graph(&[
             ("top", true, &["a"]),
@@ -531,6 +588,7 @@ mod tests {
                     direct: vec![],
                     // Nothing is declared, but this keg was built against it.
                     runtime: vec!["hidden".to_string()],
+                    installed_at: None,
                 },
             ),
             ("hidden".to_string(), FormulaReceipt::default()),

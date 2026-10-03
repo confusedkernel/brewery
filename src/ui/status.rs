@@ -138,10 +138,41 @@ fn build_outdated_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
         )];
     }
 
+    let arrow = symbol(app, "→", "->");
     system_status
         .outdated_packages
         .iter()
-        .map(|pkg| (format!("{} {}", symbol(app, "↑", "^"), pkg), theme.orange))
+        .map(|pkg| {
+            let entry = system_status
+                .outdated
+                .iter()
+                .find(|entry| &entry.name == pkg);
+            let Some(entry) = entry else {
+                return (format!("{} {pkg}", symbol(app, "↑", "^")), theme.orange);
+            };
+
+            let mut tags = String::new();
+            if entry.is_cask {
+                tags.push_str(" (cask)");
+            }
+            if entry.pinned {
+                tags.push_str(" [pinned]");
+            }
+            let color = if entry.pinned {
+                theme.text_muted
+            } else {
+                theme.orange
+            };
+            (
+                format!(
+                    "{} {pkg}  {} {arrow} {}{tags}",
+                    symbol(app, "↑", "^"),
+                    entry.installed_label(),
+                    entry.current_version
+                ),
+                color,
+            )
+        })
         .collect()
 }
 
@@ -364,6 +395,9 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         Some(CommandKind::Uninstall) => "Uninstalling",
         Some(CommandKind::Upgrade) => "Upgrading",
         Some(CommandKind::UpgradeAll) => "Upgrading outdated packages",
+        Some(CommandKind::Pin) => "Pinning",
+        Some(CommandKind::Unpin) => "Unpinning",
+        Some(CommandKind::Update) => "Updating Homebrew",
         Some(CommandKind::ServiceStart) => "Starting service",
         Some(CommandKind::ServiceStop) => "Stopping service",
         Some(CommandKind::ServiceRestart) => "Restarting service",
@@ -416,6 +450,8 @@ fn build_recent_completion_items(app: &App) -> Option<Vec<StatusLine>> {
         CommandKind::Uninstall => "Uninstall",
         CommandKind::Upgrade => "Upgrade",
         CommandKind::UpgradeAll => "Upgrade all outdated",
+        CommandKind::Pin => "Pin",
+        CommandKind::Unpin => "Unpin",
         CommandKind::ServiceStart => "Service start",
         CommandKind::ServiceStop => "Service stop",
         CommandKind::ServiceRestart => "Service restart",
@@ -471,13 +507,17 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
     };
     items.push((format!("Doctor: {}", doctor_status.0), doctor_status.1));
 
+    let pinned_suffix = match system_status.pinned.len() {
+        0 => String::new(),
+        n => format!(", {n} pinned"),
+    };
     let outdated_status = match system_status.outdated_count {
         Some(0) => (
-            format!("{} All up to date", symbol(app, "✓", "ok")),
+            format!("{} All up to date{pinned_suffix}", symbol(app, "✓", "ok")),
             theme.green,
         ),
         Some(n) => (
-            format!("{} {} outdated", symbol(app, "↑", "^"), n),
+            format!("{} {} outdated{pinned_suffix}", symbol(app, "↑", "^"), n),
             theme.orange,
         ),
         None => ("? Unknown".to_string(), theme.text_muted),
@@ -508,18 +548,21 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
     }
 
     if let Some(update_status) = system_status.brew_update_status.as_ref() {
-        let color = match update_status.as_str() {
-            "Up to date" => theme.green,
-            "Update recommended" => theme.orange,
-            _ => theme.text_muted,
+        let (color, hint) = match update_status.as_str() {
+            "Up to date" => (theme.green, ""),
+            "Update recommended" => (theme.orange, " (e to run)"),
+            _ => (theme.text_muted, ""),
         };
-        items.push((format!("Brew update: {update_status}"), color));
+        items.push((format!("Brew update: {update_status}{hint}"), color));
     }
     if let Some(secs) = system_status.last_brew_update_secs_ago {
         items.push((
             format!("Last brew update: {} ago", format_elapsed(secs)),
             theme.text_muted,
         ));
+    }
+    if let Some(hint) = app.autoremove_hint() {
+        items.push((format!("Orphans: {hint}, a to autoremove"), theme.orange));
     }
 
     if let Some(t) = app.last_status_check {

@@ -52,7 +52,11 @@ enum NormalAction {
     ToggleOutdatedFilter,
     ToggleInstalledKind,
     ToggleLeavesScope,
+    CycleSort,
     Package(PackageAction),
+    TogglePin,
+    OpenHomepage,
+    BrewUpdate,
     UpgradeSelectedOrOutdated,
     Service(ServiceAction),
     ServiceInfo,
@@ -208,6 +212,10 @@ fn normal_action_for(key: KeyEvent) -> Option<NormalAction> {
         KeyCode::Char('o') => NormalAction::ToggleOutdatedFilter,
         KeyCode::Char('C') => NormalAction::ToggleInstalledKind,
         KeyCode::Char('L') => NormalAction::ToggleLeavesScope,
+        KeyCode::Char('O') => NormalAction::CycleSort,
+        KeyCode::Char('p') => NormalAction::TogglePin,
+        KeyCode::Char('g') => NormalAction::OpenHomepage,
+        KeyCode::Char('e') => NormalAction::BrewUpdate,
         KeyCode::Char('i') => NormalAction::Package(PackageAction::Install),
         KeyCode::Char('u') => NormalAction::Package(PackageAction::Uninstall),
         KeyCode::Char('U') => NormalAction::UpgradeSelectedOrOutdated,
@@ -302,6 +310,23 @@ fn run_normal_action(
             app.clear_pending_confirmations();
             app.toggle_leaves_scope();
         }
+        NormalAction::CycleSort => {
+            app.clear_pending_confirmations();
+            app.cycle_sort_mode();
+        }
+        NormalAction::TogglePin => {
+            if app.is_cask_mode() {
+                app.set_status("Pinning is formula-only");
+            } else if let Some(pkg) = selected_installed_for_action(app, "pin") {
+                toggle_pin(app, channels, pkg);
+            }
+        }
+        NormalAction::OpenHomepage => open_homepage(app, channels),
+        NormalAction::BrewUpdate => {
+            app.clear_pending_confirmations();
+            app.request_command(CommandKind::Update, &["update"], &channels.command_tx);
+            app.set_status("Running brew update...");
+        }
         NormalAction::ToggleInstalledKind => {
             app.clear_pending_confirmations();
             app.toggle_installed_kind();
@@ -311,7 +336,9 @@ fn run_normal_action(
             app.update_active_installed_filter();
         }
         NormalAction::Package(package_action) => {
-            if let Some(pkg) = selected_installed_for_action(app, package_action) {
+            if let Some(pkg) =
+                selected_installed_for_action(app, action_labels(package_action).verb)
+            {
                 run_or_confirm_package_action(
                     app,
                     channels,
@@ -324,7 +351,9 @@ fn run_normal_action(
         NormalAction::UpgradeSelectedOrOutdated => {
             if app.focus_panel == FocusedPanel::Status && app.status_tab == StatusTab::Outdated {
                 run_or_confirm_upgrade_all_outdated(app, channels);
-            } else if let Some(pkg) = selected_installed_for_action(app, PackageAction::Upgrade) {
+            } else if let Some(pkg) =
+                selected_installed_for_action(app, action_labels(PackageAction::Upgrade).verb)
+            {
                 run_or_confirm_package_action(
                     app,
                     channels,
@@ -392,13 +421,7 @@ fn run_normal_action(
                 &channels.command_tx,
             );
         }
-        NormalAction::Autoremove => {
-            app.request_command(
-                CommandKind::Autoremove,
-                &["autoremove"],
-                &channels.command_tx,
-            );
-        }
+        NormalAction::Autoremove => run_or_confirm_autoremove(app, channels),
         NormalAction::BundleDump => {
             app.request_command(
                 CommandKind::BundleDump,
@@ -447,10 +470,9 @@ fn run_normal_action(
 
 /// The installed package an action should target, reporting why it can't run
 /// when the list isn't focused or nothing is selected.
-fn selected_installed_for_action(app: &mut App, action: PackageAction) -> Option<String> {
+fn selected_installed_for_action(app: &mut App, verb: &str) -> Option<String> {
     if app.focus_panel != FocusedPanel::Leaves {
         let noun = app.active_kind_label_singular();
-        let verb = action_labels(action).verb;
         app.set_status(format!("Focus {noun} list to {verb}"));
         return None;
     }
@@ -671,6 +693,79 @@ fn run_or_confirm_package_action(
     app.set_status(confirmation_status);
 }
 
+/// Pinning is not destructive, so it runs on the first press. The status line
+/// says which way it went, since the list marker takes a status refresh to
+/// catch up.
+fn toggle_pin(app: &mut App, channels: &RuntimeChannels, pkg: String) {
+    app.clear_pending_confirmations();
+    if app.is_pinned(&pkg) {
+        app.request_command(CommandKind::Unpin, &["unpin", &pkg], &channels.command_tx);
+        app.set_status(format!("Unpinning {pkg}..."));
+    } else {
+        app.request_command(CommandKind::Pin, &["pin", &pkg], &channels.command_tx);
+        app.set_status(format!("Pinning {pkg}..."));
+    }
+}
+
+/// Hands the selected package's homepage to the desktop. Works for search
+/// results as well as installed packages, as long as details have loaded.
+fn open_homepage(app: &mut App, channels: &RuntimeChannels) {
+    let Some(pkg) = app.selected_package_name().map(str::to_string) else {
+        app.set_status("No package selected");
+        return;
+    };
+
+    let homepage = app
+        .details_cache
+        .peek(&pkg)
+        .and_then(|details| details.homepage.clone());
+
+    match homepage {
+        Some(url) => {
+            app.clear_pending_confirmations();
+            app.request_command(CommandKind::OpenHomepage, &[&url], &channels.command_tx);
+            app.set_status(format!("Opening {url}"));
+        }
+        None if app.details_cache.peek(&pkg).is_some() => {
+            app.set_status(format!("{pkg} has no homepage"));
+        }
+        None => app.set_status("Load details first (Enter)"),
+    }
+}
+
+/// `brew autoremove` deletes without asking, so it gets the same two-step
+/// confirmation as an uninstall, with the orphan set previewed in Details.
+fn run_or_confirm_autoremove(app: &mut App, channels: &RuntimeChannels) {
+    if app.pending_autoremove {
+        app.request_command(
+            CommandKind::Autoremove,
+            &["autoremove"],
+            &channels.command_tx,
+        );
+        app.clear_pending_confirmations();
+        app.set_status("Removing unused dependencies...");
+        return;
+    }
+
+    // With the graph loaded the answer is known; skip the prompt when it is
+    // "nothing" rather than confirming a no-op.
+    let prompt = match app.autoremove_impact() {
+        Some(impact) if impact.is_empty() => {
+            app.set_status("Nothing to autoremove");
+            return;
+        }
+        Some(_) => format!(
+            "Autoremove {}? [a] confirm, [Esc] cancel",
+            app.autoremove_hint().unwrap_or_default()
+        ),
+        None => "Autoremove unused dependencies? [a] confirm, [Esc] cancel".to_string(),
+    };
+
+    app.clear_pending_confirmations();
+    app.pending_autoremove = true;
+    app.set_status(prompt);
+}
+
 fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels) {
     let outdated = app
         .system_status
@@ -874,6 +969,21 @@ mod tests {
                 "{arrow:?} and '{letter}' should trigger the same action",
             );
         }
+    }
+
+    #[test]
+    fn new_bindings_resolve_to_their_actions() {
+        let plain = |ch| KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE);
+        assert_eq!(normal_action_for(plain('p')), Some(NormalAction::TogglePin));
+        assert_eq!(
+            normal_action_for(plain('g')),
+            Some(NormalAction::OpenHomepage)
+        );
+        assert_eq!(
+            normal_action_for(plain('e')),
+            Some(NormalAction::BrewUpdate)
+        );
+        assert_eq!(normal_action_for(plain('O')), Some(NormalAction::CycleSort));
     }
 
     #[test]

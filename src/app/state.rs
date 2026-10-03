@@ -18,10 +18,13 @@ impl App {
             leaf_formulae: Vec::new(),
             all_formulae: Vec::new(),
             leaves_only: true,
+            sort_mode: SortMode::default(),
             casks: Vec::new(),
             filtered_leaves: Vec::new(),
             filtered_casks: Vec::new(),
-            outdated_leaves: std::collections::HashSet::new(),
+            outdated_leaves: HashSet::new(),
+            outdated_casks: HashSet::new(),
+            pinned: HashSet::new(),
             filtered_leaves_dirty: true,
             package_results_selected: None,
             last_package_search: None,
@@ -49,6 +52,7 @@ impl App {
             pending_package_action: None,
             pending_service_action: None,
             pending_upgrade_all_outdated: false,
+            pending_autoremove: false,
             pending_self_update: false,
             command_history: VecDeque::with_capacity(COMMAND_HISTORY_CAPACITY),
             last_command_args: Vec::new(),
@@ -97,6 +101,7 @@ impl App {
         self.pending_package_action.is_some()
             || self.pending_service_action.is_some()
             || self.pending_upgrade_all_outdated
+            || self.pending_autoremove
             || self.pending_self_update
     }
 
@@ -104,6 +109,7 @@ impl App {
         self.pending_package_action = None;
         self.pending_service_action = None;
         self.pending_upgrade_all_outdated = false;
+        self.pending_autoremove = false;
         self.pending_self_update = false;
     }
 
@@ -239,6 +245,23 @@ impl App {
         self.status_scroll_offset = 0;
     }
 
+    pub fn cycle_sort_mode(&mut self) {
+        if self.is_cask_mode() {
+            self.set_status("Sorting only applies to formulae");
+            return;
+        }
+
+        self.sort_mode = self.sort_mode.next();
+        self.sync_installed_list();
+
+        let hint = match self.sort_mode {
+            SortMode::Size if self.sizes.is_empty() => " (sizes still loading)",
+            SortMode::Recent if self.dependency_graph.is_none() => " (receipts still loading)",
+            _ => "",
+        };
+        self.set_status(format!("Sort: {}{hint}", self.sort_mode.label()));
+    }
+
     pub fn toggle_help(&mut self) {
         self.show_help_popup = !self.show_help_popup;
         self.help_scroll_offset = 0;
@@ -361,6 +384,12 @@ impl App {
             count += 1;
         }
         if system_status.last_brew_update_secs_ago.is_some() {
+            count += 1;
+        }
+        if self
+            .autoremove_impact()
+            .is_some_and(|impact| !impact.is_empty())
+        {
             count += 1;
         }
         if self.last_status_check.is_some() {

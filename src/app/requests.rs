@@ -206,11 +206,7 @@ impl App {
         let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
         tokio::spawn(async move {
             let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            let result = if kind == CommandKind::SelfUpdate {
-                run_command("cargo", &arg_refs).await
-            } else {
-                run_brew_command(&arg_refs).await
-            };
+            let result = run_command(kind.binary(), &arg_refs).await;
             let _ = tx.send(CommandMessage { kind, result });
         });
     }

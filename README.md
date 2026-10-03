@@ -48,7 +48,15 @@ Uninstall formula ffmpeg? +46 orphans (~263.1M) [u] confirm, [Esc] cancel
 While the confirmation is armed, the Details panel lists all 46 by name, so you
 can check what you are about to lose before pressing `u` again.
 
-Both are built from Homebrew's own install receipts — the same data
+**Autoremove preview** — `brew autoremove` deletes on the first keypress.
+Brewery arms it the same way as an uninstall, with the whole orphan set and the
+disk it frees listed in Details before you confirm:
+
+```
+Autoremove 12 orphans (~301.4M)? [a] confirm, [Esc] cancel
+```
+
+All three are built from Homebrew's own install receipts — the same data
 `brew autoremove` reasons about — so the orphan set is verified to agree with
 `brew autoremove --dry-run` exactly. Notably, formulae you installed on purpose
 are never reported as collateral, even when something else also depends on them.
@@ -59,20 +67,25 @@ are never reported as collateral, even when something else also depends on them.
 
 - Installed formulae, either leaves only or all of them (`L`)
 - Installed casks, with the same actions (`Shift+C`)
+- Sort by name, disk size, or install date (`Shift+O`)
 - Instant search filtering, plus search across all of Homebrew
 - Rich details: description, homepage, versions, dependencies, reverse dependencies
+- Open a package's homepage in your browser (`g`)
 
 **Insight**
 
-- Dependency provenance — why each formula is installed
+- Dependency provenance — why each formula is installed, and when
 - Uninstall impact preview with orphan count and disk reclaimed
+- Autoremove preview: what `brew autoremove` would delete, before it does
+- Outdated packages with the version jump each upgrade makes, formulae and casks alike
 - Size leaderboard of installed packages by disk usage
 - Status panel for diagnostics, outdated packages, and `brew update` recency
 
 **Management**
 
 - Install, uninstall, upgrade, and batch-upgrade all outdated packages
-- Cleanup, autoremove, and Brewfile export
+- Pin and unpin formulae, with pinned ones marked in the list and the Outdated tab
+- `brew update`, cleanup, autoremove, and Brewfile export
 - Service controls — start, stop, restart, inspect, and filter `brew services`
 - Command history with exit status
 - Self-update via Cargo when a new release is available
@@ -126,6 +139,7 @@ Press `?` in-app for the same list, where `Enter` runs the highlighted command.
 | `f`       | Search all Homebrew packages             |
 | `Shift+C` | Toggle formulae / casks                  |
 | `Shift+L` | Toggle leaves only / all installed formulae |
+| `Shift+O` | Cycle sort: name / size / recently installed |
 | `Enter`   | Confirm search, or exit filter mode      |
 | `Esc`     | Cancel, or clear the filter              |
 
@@ -140,6 +154,8 @@ Destructive actions are confirmed by pressing the same key twice.
 | `i`       | Install selected package                                                 |
 | `u`       | Uninstall selected package, with orphan impact preview                   |
 | `Shift+U` | Upgrade selected package, or all outdated from Status → Outdated         |
+| `p`       | Pin or unpin selected formula                                            |
+| `g`       | Open selected package's homepage in the browser                          |
 | `o`       | Toggle outdated-only filter                                              |
 | `Shift+P` | Update Brewery via Cargo                                                 |
 
@@ -164,8 +180,9 @@ Available from the Status → Services tab.
 | `r` | Refresh formulae and casks     |
 | `s` | Load package sizes             |
 | `h` | Run status check               |
+| `e` | Run `brew update`              |
 | `c` | Cleanup old versions           |
-| `a` | Autoremove unused dependencies |
+| `a` | Autoremove unused dependencies, with preview |
 | `b` | Export Brewfile (bundle dump)  |
 
 ### View

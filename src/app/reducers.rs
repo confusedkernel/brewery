@@ -73,6 +73,7 @@ impl App {
                 self.last_error = None;
                 self.status = "Sizes updated".to_string();
                 self.last_sizes_refresh = Some(Instant::now());
+                self.resync_sorted_list();
             }
             Err(err) => {
                 self.last_error = Some(err.to_string());
@@ -127,13 +128,26 @@ impl App {
         }
 
         self.pending_graph = false;
+        self.resync_sorted_list();
         self.needs_redraw = true;
     }
 
     pub fn apply_status_message(&mut self, message: StatusMessage) {
         match message.result {
             Ok(status_snapshot) => {
-                self.outdated_leaves = status_snapshot.outdated_packages.iter().cloned().collect();
+                self.outdated_leaves = status_snapshot
+                    .outdated
+                    .iter()
+                    .filter(|entry| !entry.is_cask)
+                    .map(|entry| entry.name.clone())
+                    .collect();
+                self.outdated_casks = status_snapshot
+                    .outdated
+                    .iter()
+                    .filter(|entry| entry.is_cask)
+                    .map(|entry| entry.name.clone())
+                    .collect();
+                self.pinned = status_snapshot.pinned.iter().cloned().collect();
                 self.system_status = Some(status_snapshot);
                 self.reconcile_service_selection();
                 self.update_filtered_leaves();
@@ -210,6 +224,11 @@ impl App {
                             ToastLevel::Success,
                             "Brewery updated. Restart to use the new version".to_string(),
                         ));
+                    } else if message.kind == CommandKind::Update {
+                        toast = Some((
+                            ToastLevel::Success,
+                            update_summary(&self.last_command_output),
+                        ));
                     }
                 } else {
                     self.status = format!("{} failed", message.kind);
@@ -245,6 +264,11 @@ impl App {
                             ToastLevel::Error,
                             format!("Brewery update failed: {reason}"),
                         ));
+                    } else if message.kind == CommandKind::Update {
+                        let reason = first_nonempty_line(&result.stderr)
+                            .or_else(|| first_nonempty_line(&result.stdout))
+                            .unwrap_or("Unknown error");
+                        toast = Some((ToastLevel::Error, format!("brew update failed: {reason}")));
                     }
                 }
 
@@ -303,6 +327,8 @@ impl App {
                     ));
                 } else if message.kind == CommandKind::SelfUpdate {
                     toast = Some((ToastLevel::Error, format!("Brewery update failed: {err}")));
+                } else if message.kind == CommandKind::Update {
+                    toast = Some((ToastLevel::Error, format!("brew update failed: {err}")));
                 }
 
                 self.push_command_history(message.kind, false, None, command_duration_secs);
@@ -335,11 +361,7 @@ impl App {
         exit_code: Option<i32>,
         duration_secs: u64,
     ) {
-        let binary = if kind == CommandKind::SelfUpdate {
-            "cargo"
-        } else {
-            "brew"
-        };
+        let binary = kind.binary();
         let args = self.last_command_args.join(" ");
         let command = if args.is_empty() {
             binary.to_string()
@@ -386,4 +408,53 @@ fn action_target(kind: CommandKind, target: Option<&str>) -> Option<&str> {
 
 fn first_nonempty_line(text: &str) -> Option<&str> {
     text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+/// `brew update` says "Already up-to-date." when nothing changed and prints
+/// an `==> Updated Homebrew from ...` banner otherwise; either is a better
+/// toast than a bare "complete".
+fn update_summary(output: &[String]) -> String {
+    let already_current = output
+        .iter()
+        .any(|line| line.trim_start().starts_with("Already up-to-date"));
+    if already_current {
+        return "Homebrew already up to date".to_string();
+    }
+
+    let banner = output
+        .iter()
+        .map(|line| line.trim())
+        .find(|line| line.starts_with("==> Updated Homebrew"))
+        .map(|line| line.trim_start_matches("==> ").to_string());
+
+    banner.unwrap_or_else(|| "Homebrew updated; status re-checked".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::update_summary;
+
+    #[test]
+    fn summarizes_a_no_op_brew_update() {
+        let output = ["Already up-to-date.".to_string()];
+        assert_eq!(update_summary(&output), "Homebrew already up to date");
+    }
+
+    #[test]
+    fn summarizes_a_brew_update_that_changed_something() {
+        let output = [
+            "==> Updating Homebrew...".to_string(),
+            "==> Updated Homebrew from abc123 to def456.".to_string(),
+            "==> New Formulae".to_string(),
+        ];
+        assert_eq!(
+            update_summary(&output),
+            "Updated Homebrew from abc123 to def456."
+        );
+    }
+
+    #[test]
+    fn falls_back_when_brew_update_output_is_unrecognized() {
+        assert_eq!(update_summary(&[]), "Homebrew updated; status re-checked");
+    }
 }

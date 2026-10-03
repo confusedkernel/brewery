@@ -61,6 +61,35 @@ pub enum PackageKind {
     Cask,
 }
 
+/// How the installed formula list is ordered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SortMode {
+    #[default]
+    Name,
+    /// Largest first, from the size scan; unsized entries trail by name.
+    Size,
+    /// Most recently installed first, from install receipts.
+    Recent,
+}
+
+impl SortMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Size,
+            Self::Size => Self::Recent,
+            Self::Recent => Self::Name,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Size => "size",
+            Self::Recent => "recent",
+        }
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct PendingPackageAction {
     pub action: PackageAction,

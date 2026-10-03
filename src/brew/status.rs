@@ -16,10 +16,38 @@ struct LatestBreweryCacheEntry {
 
 static LATEST_BREWERY_CACHE: OnceLock<Mutex<Option<LatestBreweryCacheEntry>>> = OnceLock::new();
 
+/// One row of `brew outdated`, with the version jump an upgrade would make.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutdatedEntry {
+    pub name: String,
+    pub is_cask: bool,
+    pub installed_versions: Vec<String>,
+    pub current_version: String,
+    pub pinned: bool,
+}
+
+impl OutdatedEntry {
+    /// `1.2.0 → 1.3.0`, with the arrow left to the caller so the ASCII
+    /// fallback can be honoured.
+    pub fn installed_label(&self) -> String {
+        if self.installed_versions.is_empty() {
+            return "?".to_string();
+        }
+        self.installed_versions.join(", ")
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct StatusSnapshot {
     pub outdated_count: Option<usize>,
+    /// Outdated leaves and casks — the things the user asked for — which is
+    /// what the Outdated tab lists and what "upgrade all" counts.
     pub outdated_packages: Vec<String>,
+    /// Every outdated formula and cask, leaves or not, with versions. Feeds
+    /// the list markers and the version columns in the Outdated tab.
+    pub outdated: Vec<OutdatedEntry>,
+    /// `brew list --pinned`: formulae held back from `brew upgrade`.
+    pub pinned: Vec<String>,
     pub brew_version: Option<String>,
     pub brew_update_status: Option<String>,
     pub last_brew_update_secs_ago: Option<u64>,
@@ -47,6 +75,7 @@ pub async fn fetch_status(known_leaves: Option<Vec<String>>) -> anyhow::Result<S
         brew_repo_result,
         core_repo_result,
         outdated_result,
+        pinned_result,
         services_result,
         latest_brewery_version,
     ) = tokio::join!(
@@ -54,7 +83,8 @@ pub async fn fetch_status(known_leaves: Option<Vec<String>>) -> anyhow::Result<S
         fetch_leaf_set(known_leaves),
         run_brew_command(&["--repository"]),
         run_brew_command(&["--repository", "homebrew/core"]),
-        run_brew_command(&["outdated", "--formula"]),
+        run_brew_command(&["outdated", "--json=v2"]),
+        run_brew_command(&["list", "--pinned"]),
         fetch_services(),
         fetch_latest_brewery_version_cached(),
     );
@@ -101,15 +131,70 @@ pub async fn fetch_status(known_leaves: Option<Vec<String>>) -> anyhow::Result<S
         status.services = services;
     }
 
-    if let Ok(result) = outdated_result {
-        let packages: Vec<String> = bare_formula_names(&result.stdout)
-            .filter(|name| leaf_set.contains(name))
+    if let Ok(result) = pinned_result
+        && result.success
+    {
+        status.pinned = bare_formula_names(&result.stdout).collect();
+    }
+
+    if let Ok(result) = outdated_result
+        && result.success
+    {
+        status.outdated = parse_outdated_json(&result.stdout).unwrap_or_default();
+        let packages: Vec<String> = status
+            .outdated
+            .iter()
+            .filter(|entry| entry.is_cask || leaf_set.contains(&entry.name))
+            .map(|entry| entry.name.clone())
             .collect();
         status.outdated_count = Some(packages.len());
         status.outdated_packages = packages;
     }
 
     Ok(status)
+}
+
+#[derive(serde::Deserialize)]
+struct OutdatedJson {
+    #[serde(default)]
+    formulae: Vec<OutdatedEntryJson>,
+    #[serde(default)]
+    casks: Vec<OutdatedEntryJson>,
+}
+
+#[derive(serde::Deserialize)]
+struct OutdatedEntryJson {
+    name: String,
+    #[serde(default)]
+    installed_versions: Vec<String>,
+    #[serde(default)]
+    current_version: String,
+    #[serde(default)]
+    pinned: bool,
+}
+
+/// `brew outdated --json=v2` covers formulae and casks in one call, at the
+/// same cost as the plain formula listing, and is the only form that reports
+/// the version an upgrade would land on.
+fn parse_outdated_json(stdout: &str) -> Option<Vec<OutdatedEntry>> {
+    let doc: OutdatedJson = serde_json::from_str(stdout).ok()?;
+
+    let convert = |entry: OutdatedEntryJson, is_cask: bool| OutdatedEntry {
+        name: short_name(&entry.name),
+        is_cask,
+        installed_versions: entry.installed_versions,
+        current_version: entry.current_version,
+        pinned: entry.pinned,
+    };
+
+    let mut entries: Vec<OutdatedEntry> = doc
+        .formulae
+        .into_iter()
+        .map(|entry| convert(entry, false))
+        .chain(doc.casks.into_iter().map(|entry| convert(entry, true)))
+        .collect();
+    entries.sort_by(|left, right| left.name.cmp(&right.name));
+    Some(entries)
 }
 
 /// Leaves the app already has, or a fresh `brew leaves` when it has none yet.
@@ -233,7 +318,68 @@ fn write_cached_latest_brewery_version(version: Option<String>) {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_newer_version, parse_latest_brewery_version, parse_semver_triplet};
+    use super::{
+        is_newer_version, parse_latest_brewery_version, parse_outdated_json, parse_semver_triplet,
+    };
+
+    #[test]
+    fn parses_outdated_formulae_and_casks_with_versions() {
+        let stdout = r#"{
+            "formulae": [
+                {
+                    "name": "homebrew/core/btop",
+                    "installed_versions": ["1.4.6"],
+                    "current_version": "1.4.7",
+                    "pinned": false,
+                    "pinned_version": null
+                },
+                {
+                    "name": "node",
+                    "installed_versions": ["22.1.0", "24.0.0"],
+                    "current_version": "24.2.0",
+                    "pinned": true,
+                    "pinned_version": "24.0.0"
+                }
+            ],
+            "casks": [
+                {
+                    "name": "obsidian",
+                    "installed_versions": ["1.12.4"],
+                    "current_version": "1.13.7",
+                    "pinned": false,
+                    "pinned_version": null
+                }
+            ]
+        }"#;
+
+        let entries = parse_outdated_json(stdout).expect("json should parse");
+        assert_eq!(entries.len(), 3);
+
+        let btop = &entries[0];
+        assert_eq!(btop.name, "btop", "tap prefix should be stripped");
+        assert!(!btop.is_cask);
+        assert_eq!(btop.installed_label(), "1.4.6");
+        assert_eq!(btop.current_version, "1.4.7");
+
+        let node = &entries[1];
+        assert!(node.pinned);
+        assert_eq!(node.installed_label(), "22.1.0, 24.0.0");
+
+        let obsidian = &entries[2];
+        assert!(obsidian.is_cask);
+    }
+
+    #[test]
+    fn rejects_non_json_outdated_output() {
+        assert!(
+            parse_outdated_json(
+                "btop
+node
+"
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn parses_latest_brewery_version_from_cargo_search_output() {
@@ -248,6 +394,50 @@ mod tests {
     fn ignores_unrelated_cargo_search_output() {
         let stdout = "othercrate = \"1.2.3\"\n";
         assert_eq!(parse_latest_brewery_version(stdout), None);
+    }
+
+    /// The JSON form of `brew outdated` has to agree with the plain listing,
+    /// since the plain one is what the app used to trust. Hits the real
+    /// system, so it is opt-in: `cargo test -- --ignored --nocapture`
+    #[tokio::test]
+    #[ignore = "requires a local Homebrew installation"]
+    async fn outdated_json_agrees_with_plain_listing() {
+        use super::{bare_formula_names, fetch_status, run_brew_command};
+
+        let status = fetch_status(None).await.expect("status should load");
+
+        let plain = run_brew_command(&["outdated", "--formula"])
+            .await
+            .expect("brew outdated should run");
+        let mut expected: Vec<String> = bare_formula_names(&plain.stdout).collect();
+        expected.sort();
+
+        let mut parsed: Vec<String> = status
+            .outdated
+            .iter()
+            .filter(|entry| !entry.is_cask)
+            .map(|entry| entry.name.clone())
+            .collect();
+        parsed.sort();
+
+        println!(
+            "{} outdated formulae, {} outdated casks, {} pinned, {} listed in the tab",
+            parsed.len(),
+            status.outdated.iter().filter(|entry| entry.is_cask).count(),
+            status.pinned.len(),
+            status.outdated_packages.len(),
+        );
+        assert_eq!(
+            parsed, expected,
+            "JSON and plain outdated listings disagree"
+        );
+        assert!(
+            status
+                .outdated
+                .iter()
+                .all(|entry| !entry.current_version.is_empty()),
+            "every outdated entry should carry the version an upgrade lands on"
+        );
     }
 
     #[test]
