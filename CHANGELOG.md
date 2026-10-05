@@ -5,10 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.1] - 2026-10-05
 
 ### Fixed
 - Quitting no longer leaves background `brew` commands (and the `curl` downloads they start) running as orphans. On a slow network they piled up with every launch, all fetching the same Homebrew API data, until `brew leaves` and the status check never finished and the formula list and status panel stayed empty
+- The Activity tab can no longer scroll past its last line into blank space
+- With `BREWERY_ASCII=1`, the first `Alt+i` now switches to Nerd Font icons instead of doing nothing
+
+### Changed
+- Only one confirmation can be armed at a time; arming a new one replaces the last
+- Internal simplification: background results share one message channel, and confirmations and fetch tracking each live in a single field
 
 ## [0.7.0] - 2026-10-03
 
