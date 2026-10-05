@@ -1,10 +1,9 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::widgets::{List, ListItem, ListState};
 
 use crate::app::{App, InputMode, SortMode};
-use crate::ui::util::symbol;
+use crate::ui::util::{panel_block, panel_title, styled_line, symbol};
 
 pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
@@ -104,27 +103,11 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         (title, rows, selected)
     };
 
-    let border_color = if is_focused {
-        theme.border_active
-    } else {
-        theme.border
-    };
-    let title_modifier = if is_focused {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(theme.bg_panel))
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(title_modifier),
-        ));
+    let block = panel_block(
+        app,
+        panel_title(title, theme.accent, is_focused),
+        is_focused,
+    );
 
     let leaves_list = List::new(list_items)
         .block(block)
@@ -143,8 +126,5 @@ pub fn draw_leaves_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
 }
 
 fn styled_item(text: impl Into<String>, color: Color) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::styled(
-        text.into(),
-        Style::default().fg(color),
-    )))
+    ListItem::new(styled_line(text, color))
 }

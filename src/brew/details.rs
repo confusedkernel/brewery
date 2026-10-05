@@ -17,12 +17,6 @@ pub enum DetailsLoad {
     Full,
 }
 
-pub struct DetailsMessage {
-    pub pkg: String,
-    pub load: DetailsLoad,
-    pub result: anyhow::Result<Details>,
-}
-
 #[derive(serde::Deserialize)]
 struct BrewInfo {
     #[serde(default)]

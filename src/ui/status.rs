@@ -1,22 +1,22 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use crate::app::{App, StatusTab, ToastLevel};
 use crate::brew::{CommandKind, StatusSnapshot};
 use crate::format::format_size;
-use crate::ui::util::symbol;
+use crate::ui::util::{panel_block, styled_line, symbol};
 
 type StatusLine = (String, Color);
 
-const STATUS_TABS: [(&str, StatusTab); 5] = [
-    ("Activity", StatusTab::Activity),
-    ("Issues", StatusTab::Issues),
-    ("Outdated", StatusTab::Outdated),
-    ("Services", StatusTab::Services),
-    ("History", StatusTab::History),
-];
+/// How many scrollable lines the active tab renders, which bounds how far it
+/// can scroll.
+pub fn item_count(app: &App) -> usize {
+    app.system_status
+        .as_ref()
+        .map_or(0, |status| build_tab_items(app, status).len())
+}
 
 pub fn tab_at_column(app: &App, area: Rect, column: u16) -> Option<StatusTab> {
     if area.width <= 2 {
@@ -33,18 +33,18 @@ pub fn tab_at_column(app: &App, area: Rect, column: u16) -> Option<StatusTab> {
     let separator_width = text_width(separator);
     let mut cursor = inner_left;
 
-    for (index, (name, tab)) in STATUS_TABS.iter().enumerate() {
-        let label = format!(" {} ", name);
+    for (index, tab) in StatusTab::ALL.into_iter().enumerate() {
+        let label = format!(" {} ", tab.label());
         let tab_width = text_width(&label);
         let tab_end = cursor.saturating_add(tab_width.saturating_sub(1));
 
         if column >= cursor && column <= tab_end {
-            return Some(*tab);
+            return Some(tab);
         }
 
         cursor = cursor.saturating_add(tab_width);
 
-        if index + 1 < STATUS_TABS.len() {
+        if index + 1 < StatusTab::ALL.len() {
             let separator_end = cursor.saturating_add(separator_width.saturating_sub(1));
             if column >= cursor && column <= separator_end {
                 return None;
@@ -64,31 +64,23 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
     let theme = &app.theme;
     let mut lines = Vec::new();
 
-    if app.pending_status {
-        lines.push(Line::from(Span::styled(
-            "  Checking status...",
-            Style::default().fg(theme.text_muted),
-        )));
+    if app.status_job.is_running() {
+        lines.push(styled_line("  Checking status...", theme.text_muted));
     } else if let Some(system_status) = &app.system_status {
         let scroll_items = build_tab_items(app, system_status);
         append_scrolled_lines(app, &mut lines, &scroll_items);
     } else {
-        lines.push(Line::from(Span::styled(
+        lines.push(styled_line(
             "  Press 'h' for status check",
-            Style::default().fg(theme.text_muted),
-        )));
+            theme.text_muted,
+        ));
     }
 
     append_last_error_line(app, &mut lines);
 
-    let border_color = if is_focused {
-        theme.border_active
-    } else {
-        theme.border
-    };
     let mut title_spans: Vec<Span> = Vec::new();
-    for (i, (name, tab)) in STATUS_TABS.iter().enumerate() {
-        let style = if *tab == app.status_tab {
+    for (i, tab) in StatusTab::ALL.into_iter().enumerate() {
+        let style = if tab == app.status_tab {
             let modifier = if is_focused {
                 Modifier::BOLD
             } else {
@@ -98,8 +90,8 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         } else {
             Style::default().fg(theme.text_muted)
         };
-        title_spans.push(Span::styled(format!(" {} ", name), style));
-        if i + 1 < STATUS_TABS.len() {
+        title_spans.push(Span::styled(format!(" {} ", tab.label()), style));
+        if i + 1 < StatusTab::ALL.len() {
             title_spans.push(Span::styled(
                 symbol(app, "·", "|"),
                 Style::default().fg(theme.border),
@@ -107,11 +99,7 @@ pub fn draw_status_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_f
         }
     }
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(theme.bg_panel))
-        .title(Line::from(title_spans));
+    let block = panel_block(app, Line::from(title_spans), is_focused);
 
     let paragraph = Paragraph::new(lines)
         .block(block)
@@ -182,7 +170,7 @@ fn build_issues_items(app: &App) -> Vec<StatusLine> {
     let Some(report) = app.doctor.as_ref() else {
         // The doctor run outlives the rest of the status check, so this tab is
         // the one place where the wait is visible.
-        let message = if app.pending_doctor {
+        let message = if app.doctor_job.is_running() {
             "Running brew doctor..."
         } else {
             "brew doctor could not be run"
@@ -318,7 +306,7 @@ fn build_activity_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
         items = build_status_snapshot_items(app, system_status);
     }
 
-    if !app.pending_command {
+    if !app.command_job.is_running() {
         prepend_toast_item(app, &mut items);
         append_last_command_error(app, &mut items);
     }
@@ -327,63 +315,29 @@ fn build_activity_items(app: &App, system_status: &StatusSnapshot) -> Vec<Status
 }
 
 fn build_pending_request_items(app: &App) -> Vec<StatusLine> {
-    let theme = &app.theme;
     let spinner = spinner_frame(app);
-    let mut items = Vec::new();
-
-    if app.pending_leaves {
-        let elapsed = app
-            .pending_leaves_started_at
-            .map(|started| started.elapsed().as_secs())
-            .unwrap_or(0);
-        items.push((
-            format!("{spinner} Refreshing leaves ({elapsed}s)"),
-            theme.accent_secondary,
-        ));
-    }
-
-    if app.pending_casks {
-        let elapsed = app
-            .pending_casks_started_at
-            .map(|started| started.elapsed().as_secs())
-            .unwrap_or(0);
-        items.push((
-            format!("{spinner} Refreshing casks ({elapsed}s)"),
-            theme.accent_secondary,
-        ));
-    }
-
-    if app.pending_sizes {
-        let elapsed = app
-            .pending_sizes_started_at
-            .map(|started| started.elapsed().as_secs())
-            .unwrap_or(0);
-        items.push((
-            format!("{spinner} Refreshing sizes ({elapsed}s)"),
-            theme.accent_secondary,
-        ));
-    }
-
-    if app.pending_status {
-        let elapsed = app
-            .pending_status_started_at
-            .map(|started| started.elapsed().as_secs())
-            .unwrap_or(0);
-        items.push((
-            format!("{spinner} Refreshing status/outdated/services ({elapsed}s)"),
-            theme.accent_secondary,
-        ));
-    }
-
-    items
+    [
+        (app.leaves_job, "leaves"),
+        (app.casks_job, "casks"),
+        (app.sizes_job, "sizes"),
+        (app.status_job, "status/outdated/services"),
+    ]
+    .into_iter()
+    .filter(|(job, _)| job.is_running())
+    .map(|(job, what)| {
+        (
+            format!("{spinner} Refreshing {what} ({}s)", job.elapsed_secs()),
+            app.theme.accent_secondary,
+        )
+    })
+    .collect()
 }
 
 fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
-    if !(app.pending_command
+    if !(app.command_job.is_running()
         && app
             .last_command
-            .map(CommandKind::is_activity_command)
-            .unwrap_or(false))
+            .is_some_and(CommandKind::is_activity_command))
     {
         return None;
     }
@@ -410,26 +364,15 @@ fn build_pending_command_items(app: &App) -> Option<Vec<StatusLine>> {
         .as_ref()
         .map(|pkg| format!("{spinner} {action} {pkg}"))
         .unwrap_or_else(|| format!("{spinner} {action}"));
-    let elapsed = app
-        .command_started_at
-        .map(|t| format!("{}s", t.elapsed().as_secs()))
-        .unwrap_or_else(|| "0s".to_string());
+    let elapsed = app.command_job.elapsed_secs();
 
-    let mut items = vec![(format!("{label} ({elapsed})"), theme.accent)];
-    if let Some(kind) = app.last_command {
-        let binary = if kind == CommandKind::SelfUpdate {
-            "cargo"
-        } else {
-            "brew"
-        };
-        let args = app.last_command_args.join(" ");
-        let command_text = if args.is_empty() {
-            binary.to_string()
-        } else {
-            format!("{binary} {args}")
-        };
-        items.push((format!("Command: {command_text}"), theme.text_muted));
-    }
+    let mut items = vec![
+        (format!("{label} ({elapsed}s)"), theme.accent),
+        (
+            format!("Command: {}", app.last_command_line()),
+            theme.text_muted,
+        ),
+    ];
     items.extend(
         app.last_command_output
             .iter()
@@ -502,7 +445,7 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
             symbol(app, "⚠ Issues found", "! Issues found"),
             theme.yellow,
         ),
-        None if app.pending_doctor => ("Checking...", theme.text_muted),
+        None if app.doctor_job.is_running() => ("Checking...", theme.text_muted),
         None => ("? Unknown", theme.text_muted),
     };
     items.push((format!("Doctor: {}", doctor_status.0), doctor_status.1));
@@ -565,29 +508,18 @@ fn build_status_snapshot_items(app: &App, system_status: &StatusSnapshot) -> Vec
         items.push((format!("Orphans: {hint}, a to autoremove"), theme.orange));
     }
 
-    if let Some(t) = app.last_status_check {
-        items.push((
-            format!("Last check: {}s ago", t.elapsed().as_secs()),
-            theme.text_muted,
-        ));
-    }
-    if let Some(t) = app.last_leaves_refresh {
-        items.push((
-            format!("Leaves refresh: {}s ago", t.elapsed().as_secs()),
-            theme.text_muted,
-        ));
-    }
-    if let Some(t) = app.last_casks_refresh {
-        items.push((
-            format!("Casks refresh: {}s ago", t.elapsed().as_secs()),
-            theme.text_muted,
-        ));
-    }
-    if let Some(t) = app.last_sizes_refresh {
-        items.push((
-            format!("Sizes refresh: {}s ago", t.elapsed().as_secs()),
-            theme.text_muted,
-        ));
+    for (job, label) in [
+        (app.status_job, "Last check"),
+        (app.leaves_job, "Leaves refresh"),
+        (app.casks_job, "Casks refresh"),
+        (app.sizes_job, "Sizes refresh"),
+    ] {
+        if let Some(finished_at) = job.finished_at {
+            items.push((
+                format!("{label}: {}s ago", finished_at.elapsed().as_secs()),
+                theme.text_muted,
+            ));
+        }
     }
     if let Some(cmd) = &app.last_command {
         items.push((format!("Last cmd: {}", cmd), theme.text_secondary));
@@ -630,34 +562,28 @@ fn append_last_command_error(app: &App, items: &mut Vec<StatusLine>) {
 fn append_scrolled_lines(app: &App, lines: &mut Vec<Line<'_>>, scroll_items: &[StatusLine]) {
     let theme = &app.theme;
     if app.status_scroll_offset > 0 {
-        lines.push(Line::from(Span::styled(
+        lines.push(styled_line(
             format!(
                 "  {} {} more above",
                 symbol(app, "↑", "^"),
                 app.status_scroll_offset
             ),
-            Style::default().fg(theme.text_muted),
-        )));
+            theme.text_muted,
+        ));
     }
 
     for (text, color) in scroll_items.iter().skip(app.status_scroll_offset) {
-        lines.push(Line::from(Span::styled(
-            format!("  {}", text),
-            Style::default().fg(*color),
-        )));
+        lines.push(styled_line(format!("  {text}"), *color));
     }
 }
 
 fn append_last_error_line(app: &App, lines: &mut Vec<Line<'_>>) {
     let theme = &app.theme;
     if let Some(error) = app.last_error.as_deref() {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("  {} ", symbol(app, "✗", "x")),
-                Style::default().fg(theme.red),
-            ),
-            Span::styled(error.to_string(), Style::default().fg(theme.red)),
-        ]));
+        lines.push(styled_line(
+            format!("  {} {error}", symbol(app, "✗", "x")),
+            theme.red,
+        ));
     }
 }
 

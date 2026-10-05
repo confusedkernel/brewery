@@ -1,38 +1,25 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use crate::app::App;
 use crate::format::format_size;
+use crate::ui::util::{panel_block, panel_title, styled_line};
 
 pub fn draw_sizes_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let title = if app.pending_sizes {
-        " Sizes (loading...)".to_string()
+    let title = if app.sizes_job.is_running() {
+        " Sizes (loading...)"
     } else {
-        " Sizes".to_string()
-    };
-
-    let border_color = if is_focused {
-        theme.border_active
-    } else {
-        theme.border
-    };
-    let title_modifier = if is_focused {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
+        " Sizes"
     };
 
     let lines = if app.sizes.is_empty() {
         vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "  Press 's' to load sizes",
-                Style::default().fg(theme.text_muted),
-            )),
+            styled_line("  Press 's' to load sizes", theme.text_muted),
         ]
     } else {
         app.sizes
@@ -55,16 +42,11 @@ pub fn draw_sizes_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_fo
             .collect()
     };
 
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(theme.bg_panel))
-        .title(Span::styled(
-            title,
-            Style::default()
-                .fg(theme.yellow)
-                .add_modifier(title_modifier),
-        ));
+    let block = panel_block(
+        app,
+        panel_title(title, theme.yellow, is_focused),
+        is_focused,
+    );
 
     let paragraph = Paragraph::new(lines)
         .block(block)

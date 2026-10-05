@@ -8,7 +8,7 @@ enum ServiceState {
     Error,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ServiceEntry {
     pub name: String,
     pub status: String,
@@ -55,15 +55,6 @@ impl ServiceEntry {
     }
 }
 
-#[derive(Deserialize)]
-struct ServiceEntryJson {
-    name: String,
-    status: String,
-    user: Option<String>,
-    file: Option<String>,
-    exit_code: Option<i32>,
-}
-
 pub async fn fetch_services() -> anyhow::Result<Vec<ServiceEntry>> {
     let json_result = run_brew_command(&["services", "list", "--json"]).await?;
     if json_result.success
@@ -81,17 +72,7 @@ pub async fn fetch_services() -> anyhow::Result<Vec<ServiceEntry>> {
 }
 
 fn parse_services_json(stdout: &str) -> Option<Vec<ServiceEntry>> {
-    let mut entries: Vec<ServiceEntry> = serde_json::from_str::<Vec<ServiceEntryJson>>(stdout)
-        .ok()?
-        .into_iter()
-        .map(|entry| ServiceEntry {
-            name: entry.name,
-            status: entry.status,
-            user: entry.user,
-            file: entry.file,
-            exit_code: entry.exit_code,
-        })
-        .collect();
+    let mut entries: Vec<ServiceEntry> = serde_json::from_str(stdout).ok()?;
 
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     Some(entries)

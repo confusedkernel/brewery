@@ -13,10 +13,6 @@ pub struct InstalledFormulae {
     pub all: Vec<String>,
 }
 
-pub struct LeavesMessage {
-    pub result: anyhow::Result<InstalledFormulae>,
-}
-
 pub async fn fetch_leaves() -> anyhow::Result<InstalledFormulae> {
     let (leaves, all) = tokio::try_join!(fetch_leaf_names(), fetch_installed_names())?;
 

@@ -17,17 +17,17 @@ impl App {
             leaves: Vec::new(),
             leaf_formulae: Vec::new(),
             all_formulae: Vec::new(),
+            leaves_job: Job::default(),
             leaves_only: true,
             sort_mode: SortMode::default(),
             casks: Vec::new(),
+            casks_job: Job::default(),
             filtered_leaves: Vec::new(),
             filtered_casks: Vec::new(),
             outdated_leaves: HashSet::new(),
             outdated_casks: HashSet::new(),
             pinned: HashSet::new(),
-            filtered_leaves_dirty: true,
             package_results_selected: None,
-            last_package_search: None,
             last_result_details_pkg: None,
             selected_index: Some(0),
             selected_cask_index: Some(0),
@@ -36,46 +36,29 @@ impl App {
             package_results: Vec::new(),
             view_mode: ViewMode::Details,
             sizes: Vec::new(),
-            pending_sizes: false,
-            icon_mode: IconMode::Auto,
+            sizes_job: Job::default(),
             icons_ascii: detect_icon_ascii(),
             mouse_enabled: detect_mouse_enabled(),
-            pending_command: false,
             last_command: None,
+            command_job: Job::default(),
             last_command_target: None,
-            last_command_target_is_cask: false,
-            command_started_at: None,
             last_command_completed: None,
             last_command_output: Vec::new(),
             last_command_error: None,
             last_error: None,
-            pending_package_action: None,
-            pending_service_action: None,
-            pending_upgrade_all_outdated: false,
-            pending_autoremove: false,
-            pending_self_update: false,
+            pending_confirmation: None,
             command_history: VecDeque::with_capacity(COMMAND_HISTORY_CAPACITY),
             last_command_args: Vec::new(),
-            pending_leaves: false,
-            pending_casks: false,
-            pending_leaves_started_at: None,
-            pending_casks_started_at: None,
-            pending_sizes_started_at: None,
-            pending_status_started_at: None,
-            last_leaves_refresh: None,
-            last_casks_refresh: None,
-            last_sizes_refresh: None,
             focus_panel: FocusedPanel::Leaves,
             sizes_scroll_offset: 0,
             details_scroll_offset: 0,
             status_scroll_offset: 0,
             dependency_graph: None,
-            pending_graph: false,
+            graph_job: Job::default(),
             system_status: None,
-            pending_status: false,
+            status_job: Job::default(),
             doctor: None,
-            pending_doctor: false,
-            last_status_check: None,
+            doctor_job: Job::default(),
             status_tab: StatusTab::default(),
             services_selected_index: None,
             services_failed_only: false,
@@ -98,28 +81,29 @@ impl App {
     }
 
     pub fn has_pending_confirmation(&self) -> bool {
-        self.pending_package_action.is_some()
-            || self.pending_service_action.is_some()
-            || self.pending_upgrade_all_outdated
-            || self.pending_autoremove
-            || self.pending_self_update
+        self.pending_confirmation.is_some()
     }
 
     pub fn clear_pending_confirmations(&mut self) {
-        self.pending_package_action = None;
-        self.pending_service_action = None;
-        self.pending_upgrade_all_outdated = false;
-        self.pending_autoremove = false;
-        self.pending_self_update = false;
+        self.pending_confirmation = None;
+    }
+
+    /// Whether anything with a visible spinner is in flight. The graph and
+    /// doctor jobs load quietly and do not count.
+    pub fn is_busy(&self) -> bool {
+        [
+            self.command_job,
+            self.leaves_job,
+            self.casks_job,
+            self.sizes_job,
+            self.status_job,
+        ]
+        .iter()
+        .any(Job::is_running)
     }
 
     pub fn on_tick(&mut self) {
-        if self.pending_command
-            || self.pending_leaves
-            || self.pending_casks
-            || self.pending_sizes
-            || self.pending_status
-        {
+        if self.is_busy() {
             self.needs_redraw = true;
         }
 
@@ -180,15 +164,7 @@ impl App {
     }
 
     pub fn toggle_icons(&mut self) {
-        self.icon_mode = match self.icon_mode {
-            IconMode::Ascii => IconMode::Nerd,
-            IconMode::Auto | IconMode::Nerd => IconMode::Ascii,
-        };
-        self.icons_ascii = match self.icon_mode {
-            IconMode::Ascii => true,
-            IconMode::Nerd => false,
-            IconMode::Auto => detect_icon_ascii(),
-        };
+        self.icons_ascii = !self.icons_ascii;
         self.set_status(format!(
             "Icons: {}",
             if self.icons_ascii { "ASCII" } else { "Nerd" }
@@ -217,32 +193,27 @@ impl App {
         self.set_focus_status();
     }
 
+    pub fn cycle_focus_back(&mut self) {
+        self.focus_panel = match self.focus_panel {
+            FocusedPanel::Leaves => FocusedPanel::Details,
+            FocusedPanel::Sizes => FocusedPanel::Leaves,
+            FocusedPanel::Status => FocusedPanel::Sizes,
+            FocusedPanel::Details => FocusedPanel::Status,
+        };
+        self.set_focus_status();
+    }
+
     /// Focus moves from several places (Tab, S-Tab, mouse clicks); they all
     /// report it the same way.
     pub fn set_focus_status(&mut self) {
         self.set_status(format!("Focus: {:?}", self.focus_panel));
     }
 
-    pub fn status_tab_next(&mut self) {
-        self.status_tab = match self.status_tab {
-            StatusTab::Activity => StatusTab::Issues,
-            StatusTab::Issues => StatusTab::Outdated,
-            StatusTab::Outdated => StatusTab::Services,
-            StatusTab::Services => StatusTab::History,
-            StatusTab::History => StatusTab::Activity,
-        };
-        self.status_scroll_offset = 0; // Reset scroll when switching tabs
-    }
-
-    pub fn status_tab_prev(&mut self) {
-        self.status_tab = match self.status_tab {
-            StatusTab::Activity => StatusTab::History,
-            StatusTab::Issues => StatusTab::Activity,
-            StatusTab::Outdated => StatusTab::Issues,
-            StatusTab::Services => StatusTab::Outdated,
-            StatusTab::History => StatusTab::Services,
-        };
-        self.status_scroll_offset = 0;
+    pub fn select_status_tab(&mut self, tab: StatusTab) {
+        if self.status_tab != tab {
+            self.status_tab = tab;
+            self.status_scroll_offset = 0;
+        }
     }
 
     pub fn cycle_sort_mode(&mut self) {
@@ -278,21 +249,7 @@ impl App {
             self.leaves_outdated_only = false;
         }
 
-        self.set_status(format!("View: {}", self.active_kind_label_plural()));
-    }
-
-    pub fn active_kind_label_singular(&self) -> &'static str {
-        match self.active_package_kind {
-            PackageKind::Formula => "formula",
-            PackageKind::Cask => "cask",
-        }
-    }
-
-    pub fn active_kind_label_plural(&self) -> &'static str {
-        match self.active_package_kind {
-            PackageKind::Formula => "formulae",
-            PackageKind::Cask => "casks",
-        }
+        self.set_status(format!("View: {}", self.active_package_kind.plural()));
     }
 
     pub fn scroll_focused_up(&mut self) {
@@ -335,101 +292,15 @@ impl App {
         }
     }
 
+    /// The status panel always keeps its last two lines in view.
     pub(super) fn max_status_scroll(&self) -> usize {
-        self.system_status.as_ref().map_or(0, |h| {
-            let count = match self.status_tab {
-                StatusTab::Outdated => h.outdated_packages.len(),
-                StatusTab::Issues => self.doctor.as_ref().map_or(0, |d| d.issues.len()),
-                StatusTab::Services => self.filtered_service_count(),
-                StatusTab::History => self.command_history.len(),
-                StatusTab::Activity => self.activity_item_count(),
-            };
-            count.saturating_sub(2)
-        })
-    }
-
-    fn activity_item_count(&self) -> usize {
-        let Some(system_status) = self.system_status.as_ref() else {
-            return 0;
-        };
-
-        let mut count = 0;
-        if self.pending_command
-            && self
-                .last_command
-                .is_some_and(CommandKind::is_activity_command)
-        {
-            count += 1 + self.last_command_output.len();
-            if self.last_command_target.is_some()
-                || matches!(
-                    self.last_command,
-                    Some(CommandKind::UpgradeAll | CommandKind::SelfUpdate)
-                )
-            {
-                count += 1;
-            }
-        }
-        if self
-            .last_command_completed
-            .as_ref()
-            .is_some_and(|(_, _, at)| at.elapsed().as_secs() < 3)
-        {
-            count += 1;
-        }
-        if system_status.brew_version.is_some() {
-            count += 1;
-        }
-        count += 2; // doctor + packages
-        if system_status.brew_update_status.is_some() {
-            count += 1;
-        }
-        if system_status.last_brew_update_secs_ago.is_some() {
-            count += 1;
-        }
-        if self
-            .autoremove_impact()
-            .is_some_and(|impact| !impact.is_empty())
-        {
-            count += 1;
-        }
-        if self.last_status_check.is_some() {
-            count += 1;
-        }
-        if self.last_leaves_refresh.is_some() {
-            count += 1;
-        }
-        if self.last_casks_refresh.is_some() {
-            count += 1;
-        }
-        if self.last_sizes_refresh.is_some() {
-            count += 1;
-        }
-        if self.last_command.is_some() {
-            count += 1;
-        }
-        if self.pending_leaves {
-            count += 1;
-        }
-        if self.pending_casks {
-            count += 1;
-        }
-        if self.pending_sizes {
-            count += 1;
-        }
-        if self.pending_status {
-            count += 1;
-        }
-        count
+        crate::ui::status_item_count(self).saturating_sub(2)
     }
 }
 
 fn detect_icon_ascii() -> bool {
-    if let Ok(value) = std::env::var("BREWERY_ASCII")
-        && (value == "1" || value.eq_ignore_ascii_case("true"))
-    {
-        return true;
-    }
-    false
+    std::env::var("BREWERY_ASCII")
+        .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
 }
 
 fn detect_mouse_enabled() -> bool {

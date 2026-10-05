@@ -18,10 +18,6 @@ pub struct DoctorReport {
     pub issues: Vec<String>,
 }
 
-pub struct DoctorMessage {
-    pub result: anyhow::Result<DoctorReport>,
-}
-
 pub async fn fetch_doctor() -> anyhow::Result<DoctorReport> {
     let result = run_brew_command(&["doctor"]).await?;
 

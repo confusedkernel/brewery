@@ -70,10 +70,6 @@ pub struct RemovalImpact {
     pub orphaned: Vec<String>,
 }
 
-pub struct GraphMessage {
-    pub result: anyhow::Result<DependencyGraph>,
-}
-
 impl DependencyGraph {
     pub fn new(receipts: Receipts) -> Self {
         let mut dependents: HashMap<String, Vec<String>> = HashMap::new();

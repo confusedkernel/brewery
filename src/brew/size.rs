@@ -1,15 +1,11 @@
 use std::path::PathBuf;
 
-use super::process::cellar_path;
+use super::process::{cellar_path, ensure_success, run_background};
 
 #[derive(Clone, Debug)]
 pub struct SizeEntry {
     pub name: String,
     pub size_kb: u64,
-}
-
-pub struct SizesMessage {
-    pub result: anyhow::Result<Vec<SizeEntry>>,
 }
 
 pub async fn fetch_sizes() -> anyhow::Result<Vec<SizeEntry>> {
@@ -27,21 +23,11 @@ pub async fn fetch_sizes() -> anyhow::Result<Vec<SizeEntry>> {
         return Ok(Vec::new());
     }
 
-    let output = tokio::process::Command::new("du")
-        .arg("-sk")
-        .args(&entries)
-        .output()
-        .await?;
+    let mut args = vec![PathBuf::from("-sk")];
+    args.extend(entries);
+    let output = run_background("du", &args).await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "du failed".to_string()
-        } else {
-            stderr
-        };
-        return Err(anyhow::anyhow!(message));
-    }
+    ensure_success(&output, "du failed")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut sizes: Vec<SizeEntry> = stdout.lines().filter_map(parse_du_line).collect();

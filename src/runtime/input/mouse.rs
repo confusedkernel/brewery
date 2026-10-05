@@ -1,230 +1,133 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use crossterm::terminal::size;
-use ratatui::layout::Rect;
+use ratatui::layout::{Margin, Position, Rect};
 
 use crate::app::{App, FocusedPanel, InputMode, StatusTab};
 use crate::ui::{keymap, layout, status_tab_at_column};
 
-#[derive(Clone, Copy)]
-enum ScrollDirection {
-    Up,
-    Down,
-}
-
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent, help_max_offset: usize) {
+    let point = Position::new(mouse.column, mouse.row);
     if app.show_help_popup {
-        handle_help_popup_mouse(app, mouse, help_max_offset);
+        handle_help_popup_mouse(app, mouse.kind, point, help_max_offset);
         return;
     }
 
     let app_layout = layout::split_app(terminal_area());
+    let Some((panel, area)) = [
+        (FocusedPanel::Leaves, app_layout.leaves),
+        (FocusedPanel::Sizes, app_layout.sizes),
+        (FocusedPanel::Status, app_layout.status),
+        (FocusedPanel::Details, app_layout.details),
+    ]
+    .into_iter()
+    .find(|(_, area)| area.contains(point)) else {
+        return;
+    };
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
-            handle_left_click(app, mouse.column, mouse.row, app_layout);
+            focus_panel(app, panel);
+            match panel {
+                FocusedPanel::Leaves => select_leaves_row(app, point, area),
+                FocusedPanel::Status if point.y == area.y => select_status_tab(app, point.x, area),
+                FocusedPanel::Status => select_status_row(app, point, area),
+                FocusedPanel::Sizes | FocusedPanel::Details => {}
+            }
         }
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            focus_panel(app, panel);
+            let up = mouse.kind == MouseEventKind::ScrollUp;
+            if panel == FocusedPanel::Leaves {
+                scroll_leaves(app, up);
+            } else if up {
+                app.scroll_focused_up();
+            } else {
+                app.scroll_focused_down();
+            }
+        }
+        _ => return,
+    }
+    app.needs_redraw = true;
+}
+
+fn handle_help_popup_mouse(
+    app: &mut App,
+    kind: MouseEventKind,
+    point: Position,
+    help_max_offset: usize,
+) {
+    let popup_area = layout::help_popup_area(terminal_area());
+    if !popup_area.contains(point) {
+        return;
+    }
+
+    let before = (app.help_scroll_offset, app.help_selected_command);
+    match kind {
         MouseEventKind::ScrollUp => {
-            handle_scroll(
-                app,
-                mouse.column,
-                mouse.row,
-                ScrollDirection::Up,
-                app_layout,
-            );
+            app.help_scroll_offset = app.help_scroll_offset.saturating_sub(1);
         }
         MouseEventKind::ScrollDown => {
-            handle_scroll(
-                app,
-                mouse.column,
-                mouse.row,
-                ScrollDirection::Down,
-                app_layout,
-            );
+            app.help_scroll_offset = (app.help_scroll_offset + 1).min(help_max_offset);
         }
-        _ => {}
-    }
-}
-
-fn handle_help_popup_mouse(app: &mut App, mouse: MouseEvent, help_max_offset: usize) {
-    let popup_area = layout::help_popup_area(terminal_area());
-
-    match mouse.kind {
-        MouseEventKind::ScrollUp if contains_point(popup_area, mouse.column, mouse.row) => {
-            let next = app.help_scroll_offset.saturating_sub(1);
-            if next != app.help_scroll_offset {
-                app.help_scroll_offset = next;
-                app.needs_redraw = true;
-            }
-        }
-        MouseEventKind::ScrollDown if contains_point(popup_area, mouse.column, mouse.row) => {
-            let visible_height = layout::help_visible_line_capacity(terminal_area());
-            let max_offset = keymap::line_count()
-                .saturating_sub(visible_height)
-                .min(help_max_offset);
-            let next = (app.help_scroll_offset + 1).min(max_offset);
-            if next != app.help_scroll_offset {
-                app.help_scroll_offset = next;
-                app.needs_redraw = true;
-            }
-        }
-        MouseEventKind::Down(MouseButton::Left)
-            if contains_point(popup_area, mouse.column, mouse.row) =>
-        {
+        MouseEventKind::Down(MouseButton::Left) => {
             let inner = inner_rect(popup_area);
-            if !contains_point(inner, mouse.column, mouse.row) {
-                return;
-            }
-
-            let line = app.help_scroll_offset + mouse.row.saturating_sub(inner.y) as usize;
-            if let Some(command_index) = keymap::command_index_at_line(line)
-                && command_index != app.help_selected_command
-            {
-                app.help_selected_command = command_index;
-                app.needs_redraw = true;
+            if inner.contains(point) {
+                let line = app.help_scroll_offset + (point.y - inner.y) as usize;
+                if let Some(command_index) = keymap::command_index_at_line(line) {
+                    app.help_selected_command = command_index;
+                }
             }
         }
         _ => {}
     }
-}
-
-fn handle_left_click(app: &mut App, column: u16, row: u16, app_layout: layout::AppLayout) {
-    if contains_point(app_layout.leaves, column, row) {
-        focus_panel(app, FocusedPanel::Leaves);
-        select_leaves_row(app, column, row, app_layout.leaves);
-        app.needs_redraw = true;
-        return;
-    }
-
-    if contains_point(app_layout.sizes, column, row) {
-        focus_panel(app, FocusedPanel::Sizes);
-        app.needs_redraw = true;
-        return;
-    }
-
-    if contains_point(app_layout.status, column, row) {
-        focus_panel(app, FocusedPanel::Status);
-
-        if row == app_layout.status.y {
-            select_status_tab(app, column, app_layout.status);
-        } else {
-            select_status_row(app, column, row, app_layout.status);
-        }
-
-        app.needs_redraw = true;
-        return;
-    }
-
-    if contains_point(app_layout.details, column, row) {
-        focus_panel(app, FocusedPanel::Details);
+    if (app.help_scroll_offset, app.help_selected_command) != before {
         app.needs_redraw = true;
     }
 }
 
-fn handle_scroll(
-    app: &mut App,
-    column: u16,
-    row: u16,
-    direction: ScrollDirection,
-    app_layout: layout::AppLayout,
-) {
-    if contains_point(app_layout.leaves, column, row) {
-        focus_panel(app, FocusedPanel::Leaves);
-        scroll_leaves(app, direction);
-        app.needs_redraw = true;
-        return;
-    }
+fn scroll_leaves(app: &mut App, up: bool) {
+    let selection = |app: &App| {
+        (
+            app.package_results_selected,
+            app.selected_cask_index,
+            app.selected_index,
+        )
+    };
+    let before = selection(app);
 
-    if contains_point(app_layout.sizes, column, row) {
-        focus_panel(app, FocusedPanel::Sizes);
-        match direction {
-            ScrollDirection::Up => app.scroll_focused_up(),
-            ScrollDirection::Down => app.scroll_focused_down(),
-        }
-        app.needs_redraw = true;
-        return;
-    }
-
-    if contains_point(app_layout.status, column, row) {
-        focus_panel(app, FocusedPanel::Status);
-        match direction {
-            ScrollDirection::Up => app.scroll_focused_up(),
-            ScrollDirection::Down => app.scroll_focused_down(),
-        }
-        app.needs_redraw = true;
-        return;
-    }
-
-    if contains_point(app_layout.details, column, row) {
-        focus_panel(app, FocusedPanel::Details);
-        match direction {
-            ScrollDirection::Up => app.scroll_focused_up(),
-            ScrollDirection::Down => app.scroll_focused_down(),
-        }
-        app.needs_redraw = true;
-    }
-}
-
-fn scroll_leaves(app: &mut App, direction: ScrollDirection) {
-    if matches!(
+    let searching = matches!(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
-    ) {
-        let before = app.package_results_selected;
-        match direction {
-            ScrollDirection::Up => app.select_prev_result(),
-            ScrollDirection::Down => app.select_next_result(),
-        }
-        if app.package_results_selected != before {
-            app.clear_pending_confirmations();
-            app.on_selection_change();
-        }
-        return;
+    );
+    match (searching, up) {
+        (true, true) => app.select_prev_result(),
+        (true, false) => app.select_next_result(),
+        (false, true) => app.select_prev(),
+        (false, false) => app.select_next(),
     }
 
-    if app.is_cask_mode() {
-        let before = app.selected_cask_index;
-        match direction {
-            ScrollDirection::Up => app.select_prev(),
-            ScrollDirection::Down => app.select_next(),
-        }
-        if app.selected_cask_index != before {
-            app.clear_pending_confirmations();
-            app.on_selection_change();
-        }
-        return;
-    }
-
-    let before = app.selected_index;
-    match direction {
-        ScrollDirection::Up => app.select_prev(),
-        ScrollDirection::Down => app.select_next(),
-    }
-    if app.selected_index != before {
+    if selection(app) != before {
         app.clear_pending_confirmations();
         app.on_selection_change();
     }
 }
 
-fn select_leaves_row(app: &mut App, column: u16, row: u16, area: Rect) {
+fn select_leaves_row(app: &mut App, point: Position, area: Rect) {
     let inner = inner_rect(area);
-    if !contains_point(inner, column, row) {
+    if !inner.contains(point) {
         return;
     }
 
-    let row_index = row.saturating_sub(inner.y) as usize;
+    let row_index = (point.y - inner.y) as usize;
+    let visible_height = inner.height as usize;
 
     if matches!(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
     ) {
-        select_package_result_row(app, row_index, inner.height as usize);
-        return;
-    }
-
-    if app.is_cask_mode() {
-        select_installed_row(app, row_index, inner.height as usize, true);
+        select_package_result_row(app, row_index, visible_height);
     } else {
-        select_installed_row(app, row_index, inner.height as usize, false);
+        select_installed_row(app, row_index, visible_height);
     }
 }
 
@@ -249,61 +152,37 @@ fn select_package_result_row(app: &mut App, row_index: usize, visible_height: us
     }
 }
 
-fn select_installed_row(app: &mut App, row_index: usize, visible_height: usize, cask_mode: bool) {
-    if visible_height == 0 {
-        return;
-    }
-
-    let (filtered, selected_absolute) = if cask_mode {
-        (&app.filtered_casks, app.selected_cask_index)
+fn select_installed_row(app: &mut App, row_index: usize, visible_height: usize) {
+    let (filtered, selected) = if app.is_cask_mode() {
+        (&app.filtered_casks, &mut app.selected_cask_index)
     } else {
-        (&app.filtered_leaves, app.selected_index)
+        (&app.filtered_leaves, &mut app.selected_index)
     };
 
-    if filtered.is_empty() {
-        return;
-    }
-
-    let selected_pos = selected_absolute
-        .and_then(|selected| filtered.iter().position(|idx| *idx == selected))
+    // The list scrolls just far enough to keep the selection on screen.
+    let selected_pos = selected
+        .and_then(|current| filtered.iter().position(|idx| *idx == current))
         .unwrap_or(0);
-    let offset = selected_pos
-        .saturating_add(1)
-        .saturating_sub(visible_height);
-    let visible_index = offset + row_index;
-    let Some(&absolute_index) = filtered.get(visible_index) else {
+    let offset = (selected_pos + 1).saturating_sub(visible_height);
+    let Some(&clicked) = filtered.get(offset + row_index) else {
         return;
     };
-
-    let current = if cask_mode {
-        app.selected_cask_index
-    } else {
-        app.selected_index
-    };
-
-    if current == Some(absolute_index) {
+    if *selected == Some(clicked) {
         return;
     }
 
-    if cask_mode {
-        app.selected_cask_index = Some(absolute_index);
-    } else {
-        app.selected_index = Some(absolute_index);
-    }
+    *selected = Some(clicked);
     app.clear_pending_confirmations();
     app.on_selection_change();
 }
 
 fn select_status_tab(app: &mut App, column: u16, area: Rect) {
-    if let Some(next_tab) = status_tab_at_column(app, area, column)
-        && app.status_tab != next_tab
-    {
-        app.status_tab = next_tab;
-        app.status_scroll_offset = 0;
+    if let Some(tab) = status_tab_at_column(app, area, column) {
+        app.select_status_tab(tab);
     }
 }
 
-fn select_status_row(app: &mut App, column: u16, row: u16, area: Rect) {
+fn select_status_row(app: &mut App, point: Position, area: Rect) {
     if app.status_tab != StatusTab::Services {
         return;
     }
@@ -315,24 +194,20 @@ fn select_status_row(app: &mut App, column: u16, row: u16, area: Rect) {
     }
 
     let inner = inner_rect(area);
-    if !contains_point(inner, column, row) {
+    if !inner.contains(point) {
         return;
     }
 
-    let mut line_index = row.saturating_sub(inner.y) as usize;
+    let mut line_index = (point.y - inner.y) as usize;
+    // Past the top, the first line is the "N more above" marker.
     if app.status_scroll_offset > 0 {
         if line_index == 0 {
             return;
         }
-        line_index = line_index.saturating_sub(1);
+        line_index -= 1;
     }
 
-    let visible_index = app.status_scroll_offset + line_index;
-    let Some(&service_index) = filtered.get(visible_index) else {
-        return;
-    };
-
-    if app.services_selected_index != Some(service_index) {
+    if let Some(&service_index) = filtered.get(app.status_scroll_offset + line_index) {
         app.services_selected_index = Some(service_index);
     }
 }
@@ -351,21 +226,7 @@ fn terminal_area() -> Rect {
     Rect::new(0, 0, width, height)
 }
 
+/// The area inside a panel's border.
 fn inner_rect(area: Rect) -> Rect {
-    Rect {
-        x: area.x.saturating_add(1),
-        y: area.y.saturating_add(1),
-        width: area.width.saturating_sub(2),
-        height: area.height.saturating_sub(2),
-    }
-}
-
-fn contains_point(area: Rect, x: u16, y: u16) -> bool {
-    if area.width == 0 || area.height == 0 {
-        return false;
-    }
-
-    let max_x = area.x.saturating_add(area.width);
-    let max_y = area.y.saturating_add(area.height);
-    x >= area.x && x < max_x && y >= area.y && y < max_y
+    area.inner(Margin::new(1, 1))
 }

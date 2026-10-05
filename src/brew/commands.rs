@@ -1,4 +1,7 @@
 use std::fmt;
+use std::process::Output;
+
+use super::process::run_background;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandKind {
@@ -150,29 +153,35 @@ pub struct CommandResult {
     pub exit_code: Option<i32>,
 }
 
-pub struct CommandMessage {
-    pub kind: CommandKind,
-    pub result: anyhow::Result<CommandResult>,
+impl From<Output> for CommandResult {
+    fn from(output: Output) -> Self {
+        Self {
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            success: output.status.success(),
+            exit_code: output.status.code(),
+        }
+    }
 }
 
+/// A background `brew` query, killed if the app quits before it finishes.
 pub async fn run_brew_command(args: &[&str]) -> anyhow::Result<CommandResult> {
-    run_command("brew", args).await
+    run_background_command("brew", args).await
 }
 
+/// A background query, killed if the app quits before it finishes.
+pub async fn run_background_command(binary: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
+    Ok(run_background(binary, args).await?.into())
+}
+
+/// A command the user asked for. Deliberately not killed on quit: stopping
+/// `brew install` or `brew upgrade` partway can leave a broken keg.
 pub async fn run_command(binary: &str, args: &[&str]) -> anyhow::Result<CommandResult> {
     let output = tokio::process::Command::new(binary)
         .args(args)
         .output()
         .await?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    Ok(CommandResult {
-        stdout,
-        stderr,
-        success: output.status.success(),
-        exit_code: output.status.code(),
-    })
+    Ok(output.into())
 }
 
 #[cfg(test)]

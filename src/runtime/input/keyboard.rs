@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{
-    App, FocusedPanel, InputMode, PackageAction, PackageKind, PendingPackageAction,
+    App, Confirmation, FocusedPanel, InputMode, PackageAction, PackageKind, PendingPackageAction,
     PendingServiceAction, ServiceAction, StatusTab, ViewMode,
 };
 use crate::brew::{CommandKind, DetailsLoad};
-use crate::runtime::messages::{RuntimeChannels, handle_focus_backtab};
+use crate::runtime::messages::RuntimeChannels;
 use crate::ui::keymap;
 
 /// Whether a key press was recognized, and whether it ends the session.
@@ -270,13 +270,13 @@ fn run_normal_action(
             }
         }
         NormalAction::RefreshLists => {
-            app.request_leaves(&channels.leaves_tx);
-            app.request_casks(&channels.casks_tx);
+            app.request_leaves(&channels.tx);
+            app.request_casks(&channels.tx);
         }
         NormalAction::CycleTheme => app.cycle_theme(),
         NormalAction::ToggleMouse => app.toggle_mouse(),
-        NormalAction::LoadSizes => app.request_sizes(&channels.sizes_tx),
-        NormalAction::StatusCheck => app.request_status(&channels.status_tx),
+        NormalAction::LoadSizes => app.request_sizes(&channels.tx),
+        NormalAction::StatusCheck => app.request_status(&channels.tx),
         NormalAction::ToggleView => {
             app.view_mode = match app.view_mode {
                 ViewMode::Details => ViewMode::PackageResults,
@@ -301,9 +301,9 @@ fn run_normal_action(
             if app.leaves_outdated_only
                 && !app.is_cask_mode()
                 && app.system_status.is_none()
-                && !app.pending_status
+                && !app.status_job.is_running()
             {
-                app.request_status(&channels.status_tx);
+                app.request_status(&channels.tx);
             }
         }
         NormalAction::ToggleLeavesScope => {
@@ -324,14 +324,14 @@ fn run_normal_action(
         NormalAction::OpenHomepage => open_homepage(app, channels),
         NormalAction::BrewUpdate => {
             app.clear_pending_confirmations();
-            app.request_command(CommandKind::Update, &["update"], &channels.command_tx);
+            app.request_command(CommandKind::Update, &["update"], &channels.tx);
             app.set_status("Running brew update...");
         }
         NormalAction::ToggleInstalledKind => {
             app.clear_pending_confirmations();
             app.toggle_installed_kind();
-            if app.is_cask_mode() && app.casks.is_empty() && !app.pending_casks {
-                app.request_casks(&channels.casks_tx);
+            if app.is_cask_mode() && app.casks.is_empty() && !app.casks_job.is_running() {
+                app.request_casks(&channels.tx);
             }
             app.update_active_installed_filter();
         }
@@ -374,7 +374,7 @@ fn run_normal_action(
                 app.request_command(
                     CommandKind::ServiceInfo,
                     &["services", "info", &service],
-                    &channels.command_tx,
+                    &channels.tx,
                 );
                 app.set_status(format!("Loading service info for {service}..."));
             }
@@ -398,47 +398,40 @@ fn run_normal_action(
             }
         }
         NormalAction::SelfUpdate => {
-            if app.pending_self_update {
+            if confirm(
+                app,
+                Confirmation::SelfUpdate,
+                "Update Brewery via `cargo install brewery --locked --force`? [P] confirm, [Esc] cancel",
+            ) {
                 app.request_command(
                     CommandKind::SelfUpdate,
                     &["install", "brewery", "--locked", "--force"],
-                    &channels.command_tx,
+                    &channels.tx,
                 );
-                app.clear_pending_confirmations();
                 app.set_status("Updating Brewery...");
-            } else {
-                app.clear_pending_confirmations();
-                app.pending_self_update = true;
-                app.set_status(
-                    "Update Brewery via `cargo install brewery --locked --force`? [P] confirm, [Esc] cancel",
-                );
             }
         }
         NormalAction::Cleanup => {
-            app.request_command(
-                CommandKind::Cleanup,
-                &["cleanup", "-s"],
-                &channels.command_tx,
-            );
+            app.request_command(CommandKind::Cleanup, &["cleanup", "-s"], &channels.tx);
         }
         NormalAction::Autoremove => run_or_confirm_autoremove(app, channels),
         NormalAction::BundleDump => {
             app.request_command(
                 CommandKind::BundleDump,
                 &["bundle", "dump", "--force"],
-                &channels.command_tx,
+                &channels.tx,
             );
         }
-        NormalAction::LoadDetails => app.request_details(DetailsLoad::Basic, &channels.details_tx),
+        NormalAction::LoadDetails => app.request_details(DetailsLoad::Basic, &channels.tx),
         NormalAction::LoadDepsUses => {
             if app.is_cask_mode() {
                 app.set_status("Deps/uses are formula-only");
             } else {
-                app.request_details(DetailsLoad::Full, &channels.details_tx);
+                app.request_details(DetailsLoad::Full, &channels.tx);
             }
         }
         NormalAction::FocusNext => app.cycle_focus(),
-        NormalAction::FocusPrev => handle_focus_backtab(app),
+        NormalAction::FocusPrev => app.cycle_focus_back(),
         NormalAction::ScrollUp => {
             app.scroll_focused_up();
             if app.focus_panel == FocusedPanel::Leaves {
@@ -455,12 +448,12 @@ fn run_normal_action(
         }
         NormalAction::PrevStatusTab => {
             if app.focus_panel == FocusedPanel::Status {
-                app.status_tab_prev();
+                app.select_status_tab(app.status_tab.prev());
             }
         }
         NormalAction::NextStatusTab => {
             if app.focus_panel == FocusedPanel::Status {
-                app.status_tab_next();
+                app.select_status_tab(app.status_tab.next());
             }
         }
     }
@@ -472,13 +465,13 @@ fn run_normal_action(
 /// when the list isn't focused or nothing is selected.
 fn selected_installed_for_action(app: &mut App, verb: &str) -> Option<String> {
     if app.focus_panel != FocusedPanel::Leaves {
-        let noun = app.active_kind_label_singular();
+        let noun = app.active_package_kind.noun();
         app.set_status(format!("Focus {noun} list to {verb}"));
         return None;
     }
 
     let Some(pkg) = app.selected_installed_package().map(str::to_string) else {
-        let noun = app.active_kind_label_singular();
+        let noun = app.active_package_kind.noun();
         app.set_status(format!("No {noun} selected"));
         return None;
     };
@@ -568,12 +561,7 @@ fn handle_package_search_mode_key(
                 return KeyOutcome::Handled;
             }
 
-            app.request_command(
-                CommandKind::Search,
-                &["search", &query],
-                &channels.command_tx,
-            );
-            app.last_package_search = Some(query);
+            app.request_command(CommandKind::Search, &["search", &query], &channels.tx);
             app.set_status("Searching...");
         }
         KeyCode::Backspace => {
@@ -624,36 +612,36 @@ fn handle_package_results_mode_key(
             app.clear_pending_confirmations();
             app.on_selection_change();
         }
-        KeyCode::Char('i') => {
-            let Some(pkg) = app.selected_package_result().map(str::to_string) else {
-                app.set_status("No result selected");
-                return KeyOutcome::Handled;
+        KeyCode::Char(key @ ('i' | 'u')) => {
+            let action = if key == 'i' {
+                PackageAction::Install
+            } else {
+                PackageAction::Uninstall
             };
-            run_or_confirm_package_action(
-                app,
-                channels,
-                PackageAction::Install,
-                PackageKind::Formula,
-                pkg,
-            );
-        }
-        KeyCode::Char('u') => {
-            let Some(pkg) = app.selected_package_result().map(str::to_string) else {
-                app.set_status("No result selected");
-                return KeyOutcome::Handled;
-            };
-            run_or_confirm_package_action(
-                app,
-                channels,
-                PackageAction::Uninstall,
-                PackageKind::Formula,
-                pkg,
-            );
+            match app.selected_package_result().map(str::to_string) {
+                Some(pkg) => {
+                    run_or_confirm_package_action(app, channels, action, PackageKind::Formula, pkg)
+                }
+                None => app.set_status("No result selected"),
+            }
         }
         _ => return KeyOutcome::Unhandled,
     }
 
     KeyOutcome::Handled
+}
+
+/// Arms `pending` on the first press, showing `prompt`. Returns true on the
+/// second press of the same action, which the caller should then run.
+fn confirm(app: &mut App, pending: Confirmation, prompt: impl Into<String>) -> bool {
+    if app.pending_confirmation.as_ref() == Some(&pending) {
+        app.clear_pending_confirmations();
+        return true;
+    }
+
+    app.pending_confirmation = Some(pending);
+    app.set_status(prompt);
+    false
 }
 
 fn run_or_confirm_package_action(
@@ -664,16 +652,7 @@ fn run_or_confirm_package_action(
     pkg: String,
 ) {
     let labels = action_labels(action);
-    let noun = package_kind_noun(kind);
-
-    if matches!(app.pending_package_action.as_ref(), Some(pending) if pending.action == action && pending.kind == kind && pending.pkg == pkg)
-    {
-        let args = package_action_args(action, kind, &pkg);
-        app.request_command(labels.command, &args, &channels.command_tx);
-        app.clear_pending_confirmations();
-        app.set_status(format!("{} {noun}...", labels.verb_ing));
-        return;
-    }
+    let noun = kind.noun();
 
     // Uninstalls can silently orphan dependencies, so say so before confirming.
     let impact = match action {
@@ -683,14 +662,25 @@ fn run_or_confirm_package_action(
             .unwrap_or_default(),
         PackageAction::Install | PackageAction::Upgrade => String::new(),
     };
-
-    let confirmation_status = format!(
+    let prompt = format!(
         "{} {noun} {pkg}?{impact} [{}] confirm, [Esc] cancel",
         labels.verb_title, labels.confirm_key
     );
-    app.pending_upgrade_all_outdated = false;
-    app.pending_package_action = Some(PendingPackageAction { action, kind, pkg });
-    app.set_status(confirmation_status);
+
+    let pending = PendingPackageAction {
+        action,
+        kind,
+        pkg: pkg.clone(),
+    };
+    if confirm(app, Confirmation::Package(pending), prompt) {
+        let mut args = vec![labels.verb];
+        if kind == PackageKind::Cask {
+            args.push("--cask");
+        }
+        args.push(&pkg);
+        app.request_command(labels.command, &args, &channels.tx);
+        app.set_status(format!("{} {noun}...", labels.verb_ing));
+    }
 }
 
 /// Pinning is not destructive, so it runs on the first press. The status line
@@ -699,10 +689,10 @@ fn run_or_confirm_package_action(
 fn toggle_pin(app: &mut App, channels: &RuntimeChannels, pkg: String) {
     app.clear_pending_confirmations();
     if app.is_pinned(&pkg) {
-        app.request_command(CommandKind::Unpin, &["unpin", &pkg], &channels.command_tx);
+        app.request_command(CommandKind::Unpin, &["unpin", &pkg], &channels.tx);
         app.set_status(format!("Unpinning {pkg}..."));
     } else {
-        app.request_command(CommandKind::Pin, &["pin", &pkg], &channels.command_tx);
+        app.request_command(CommandKind::Pin, &["pin", &pkg], &channels.tx);
         app.set_status(format!("Pinning {pkg}..."));
     }
 }
@@ -715,42 +705,29 @@ fn open_homepage(app: &mut App, channels: &RuntimeChannels) {
         return;
     };
 
-    let homepage = app
-        .details_cache
-        .peek(&pkg)
-        .and_then(|details| details.homepage.clone());
+    let Some(details) = app.details_cache.peek(&pkg) else {
+        app.set_status("Load details first (Enter)");
+        return;
+    };
+    let Some(url) = details.homepage.clone() else {
+        app.set_status(format!("{pkg} has no homepage"));
+        return;
+    };
 
-    match homepage {
-        Some(url) => {
-            app.clear_pending_confirmations();
-            app.request_command(CommandKind::OpenHomepage, &[&url], &channels.command_tx);
-            app.set_status(format!("Opening {url}"));
-        }
-        None if app.details_cache.peek(&pkg).is_some() => {
-            app.set_status(format!("{pkg} has no homepage"));
-        }
-        None => app.set_status("Load details first (Enter)"),
-    }
+    app.clear_pending_confirmations();
+    app.request_command(CommandKind::OpenHomepage, &[&url], &channels.tx);
+    app.set_status(format!("Opening {url}"));
 }
 
 /// `brew autoremove` deletes without asking, so it gets the same two-step
 /// confirmation as an uninstall, with the orphan set previewed in Details.
 fn run_or_confirm_autoremove(app: &mut App, channels: &RuntimeChannels) {
-    if app.pending_autoremove {
-        app.request_command(
-            CommandKind::Autoremove,
-            &["autoremove"],
-            &channels.command_tx,
-        );
-        app.clear_pending_confirmations();
-        app.set_status("Removing unused dependencies...");
-        return;
-    }
+    let armed = app.pending_confirmation == Some(Confirmation::Autoremove);
 
     // With the graph loaded the answer is known; skip the prompt when it is
     // "nothing" rather than confirming a no-op.
     let prompt = match app.autoremove_impact() {
-        Some(impact) if impact.is_empty() => {
+        Some(impact) if impact.is_empty() && !armed => {
             app.set_status("Nothing to autoremove");
             return;
         }
@@ -761,9 +738,10 @@ fn run_or_confirm_autoremove(app: &mut App, channels: &RuntimeChannels) {
         None => "Autoremove unused dependencies? [a] confirm, [Esc] cancel".to_string(),
     };
 
-    app.clear_pending_confirmations();
-    app.pending_autoremove = true;
-    app.set_status(prompt);
+    if confirm(app, Confirmation::Autoremove, prompt) {
+        app.request_command(CommandKind::Autoremove, &["autoremove"], &channels.tx);
+        app.set_status("Removing unused dependencies...");
+    }
 }
 
 fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels) {
@@ -776,18 +754,11 @@ fn run_or_confirm_upgrade_all_outdated(app: &mut App, channels: &RuntimeChannels
         return;
     }
 
-    if app.pending_upgrade_all_outdated {
-        app.request_command(CommandKind::UpgradeAll, &["upgrade"], &channels.command_tx);
-        app.clear_pending_confirmations();
+    let prompt = format!("Upgrade all {outdated} outdated packages? [U] confirm, [Esc] cancel");
+    if confirm(app, Confirmation::UpgradeAllOutdated, prompt) {
+        app.request_command(CommandKind::UpgradeAll, &["upgrade"], &channels.tx);
         app.set_status(format!("Upgrading {outdated} outdated packages..."));
-        return;
     }
-
-    app.pending_package_action = None;
-    app.pending_upgrade_all_outdated = true;
-    app.set_status(format!(
-        "Upgrade all {outdated} outdated packages? [U] confirm, [Esc] cancel"
-    ));
 }
 
 fn run_or_confirm_service_action(
@@ -797,28 +768,28 @@ fn run_or_confirm_service_action(
     service: String,
 ) {
     let labels = service_action_labels(action);
-
-    if matches!(app.pending_service_action.as_ref(), Some(pending) if pending.action == action && pending.service == service)
-    {
-        let args = service_action_args(action, &service);
-        app.request_command(labels.command, &args, &channels.command_tx);
-        app.clear_pending_confirmations();
-        app.set_status(format!("{} service...", labels.verb_ing));
-        return;
-    }
-
-    let confirmation_status = format!(
+    let prompt = format!(
         "{} service {service}? [{}] confirm, [Esc] cancel",
         labels.verb_title, labels.confirm_key
     );
-    app.pending_package_action = None;
-    app.pending_upgrade_all_outdated = false;
-    app.pending_service_action = Some(PendingServiceAction { action, service });
-    app.set_status(confirmation_status);
+
+    let pending = PendingServiceAction {
+        action,
+        service: service.clone(),
+    };
+    if confirm(app, Confirmation::Service(pending), prompt) {
+        app.request_command(
+            labels.command,
+            &["services", labels.verb, &service],
+            &channels.tx,
+        );
+        app.set_status(format!("{} service...", labels.verb_ing));
+    }
 }
 
 /// How an action is named across the confirmation prompt, the in-progress
-/// status, and the "focus the list first" hint.
+/// status, and the "focus the list first" hint. `verb` doubles as the `brew`
+/// subcommand.
 struct ActionLabels {
     command: CommandKind,
     verb: &'static str,
@@ -876,32 +847,6 @@ fn service_action_labels(action: ServiceAction) -> ActionLabels {
             verb_title: "Restart",
             confirm_key: 'R',
         },
-    }
-}
-
-fn package_action_args(action: PackageAction, kind: PackageKind, pkg: &str) -> Vec<&str> {
-    match (action, kind) {
-        (PackageAction::Install, PackageKind::Formula) => vec!["install", pkg],
-        (PackageAction::Install, PackageKind::Cask) => vec!["install", "--cask", pkg],
-        (PackageAction::Uninstall, PackageKind::Formula) => vec!["uninstall", pkg],
-        (PackageAction::Uninstall, PackageKind::Cask) => vec!["uninstall", "--cask", pkg],
-        (PackageAction::Upgrade, PackageKind::Formula) => vec!["upgrade", pkg],
-        (PackageAction::Upgrade, PackageKind::Cask) => vec!["upgrade", "--cask", pkg],
-    }
-}
-
-fn package_kind_noun(kind: PackageKind) -> &'static str {
-    match kind {
-        PackageKind::Formula => "formula",
-        PackageKind::Cask => "cask",
-    }
-}
-
-fn service_action_args(action: ServiceAction, service: &str) -> Vec<&str> {
-    match action {
-        ServiceAction::Start => vec!["services", "start", service],
-        ServiceAction::Stop => vec!["services", "stop", service],
-        ServiceAction::Restart => vec!["services", "restart", service],
     }
 }
 

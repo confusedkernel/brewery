@@ -1,5 +1,10 @@
 //! Pure formatting helpers shared by the app and UI layers.
 
+/// The first line with any content, trimmed.
+pub fn first_nonempty_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
 pub fn format_size(size_kb: u64) -> String {
     let megabytes = size_kb as f64 / 1024.0;
     if megabytes < 1024.0 {

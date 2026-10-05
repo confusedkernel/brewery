@@ -1,20 +1,18 @@
 use super::services::{ServiceEntry, fetch_services};
+use crate::brew::commands::run_background_command;
 use crate::brew::graph::short_name;
-use crate::brew::{run_brew_command, run_command};
+use crate::brew::run_brew_command;
+use crate::format::first_nonempty_line;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 const LATEST_BREWERY_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 
-#[derive(Clone)]
-struct LatestBreweryCacheEntry {
-    version: Option<String>,
-    checked_at: SystemTime,
-}
-
-static LATEST_BREWERY_CACHE: OnceLock<Mutex<Option<LatestBreweryCacheEntry>>> = OnceLock::new();
+/// The last `cargo search` answer and when it was asked, so the five-minute
+/// background status refresh does not hit crates.io every time.
+static LATEST_BREWERY_CACHE: Mutex<Option<(SystemTime, Option<String>)>> = Mutex::new(None);
 
 /// One row of `brew outdated`, with the version jump an upgrade would make.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,10 +54,6 @@ pub struct StatusSnapshot {
     pub services: Vec<ServiceEntry>,
 }
 
-pub struct StatusMessage {
-    pub result: anyhow::Result<StatusSnapshot>,
-}
-
 /// `known_leaves` is the leaf set the app has already loaded, used to keep the
 /// outdated list to packages the user asked for. Only the first status check —
 /// which races the initial load — has to ask `brew` for it again.
@@ -93,12 +87,7 @@ pub async fn fetch_status(known_leaves: Option<Vec<String>>) -> anyhow::Result<S
     if let Ok(result) = version_result
         && result.success
     {
-        let mut lines = result
-            .stdout
-            .lines()
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty());
-        status.brew_version = lines.next().map(str::to_string);
+        status.brew_version = first_nonempty_line(&result.stdout).map(str::to_string);
     }
 
     // Process last brew update time from repository metadata
@@ -220,10 +209,6 @@ fn bare_formula_names(stdout: &str) -> impl Iterator<Item = String> + '_ {
         .map(short_name)
 }
 
-fn first_nonempty_line(text: &str) -> Option<&str> {
-    text.lines().map(str::trim).find(|line| !line.is_empty())
-}
-
 fn last_update_secs_ago(repo_paths: &[String]) -> Option<u64> {
     let mut latest: Option<SystemTime> = None;
 
@@ -247,15 +232,8 @@ fn parse_latest_brewery_version(stdout: &str) -> Option<String> {
     let line = stdout
         .lines()
         .find(|line| line.trim_start().starts_with("brewery "))?;
-    let first_quote = line.find('"')?;
-    let rest = &line[first_quote + 1..];
-    let second_quote = rest.find('"')?;
-    let version = rest[..second_quote].trim();
-    if version.is_empty() {
-        None
-    } else {
-        Some(version.to_string())
-    }
+    let version = line.split('"').nth(1)?.trim();
+    (!version.is_empty()).then(|| version.to_string())
 }
 
 fn is_newer_version(latest: &str, current: &str) -> bool {
@@ -264,56 +242,31 @@ fn is_newer_version(latest: &str, current: &str) -> bool {
 
 fn parse_semver_triplet(version: &str) -> (u64, u64, u64) {
     let core = version.split('-').next().unwrap_or(version);
-    let mut parts = core.split('.');
-    let major = parts
-        .next()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    let minor = parts
-        .next()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    let patch = parts
-        .next()
-        .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(0);
-    (major, minor, patch)
+    let mut parts = core.split('.').map(|part| part.parse().unwrap_or(0));
+    let mut next = || parts.next().unwrap_or(0);
+    (next(), next(), next())
 }
 
 async fn fetch_latest_brewery_version_cached() -> Option<String> {
-    if let Some(version) = read_cached_latest_brewery_version() {
-        return version;
+    if let Ok(cache) = LATEST_BREWERY_CACHE.lock()
+        && let Some((checked_at, version)) = cache.as_ref()
+        && checked_at
+            .elapsed()
+            .is_ok_and(|age| age <= LATEST_BREWERY_CACHE_TTL)
+    {
+        return version.clone();
     }
 
-    let fetched_version = match run_command("cargo", &["search", "brewery", "--limit", "1"]).await {
-        Ok(result) if result.success => parse_latest_brewery_version(&result.stdout),
-        _ => None,
-    };
+    let fetched_version =
+        match run_background_command("cargo", &["search", "brewery", "--limit", "1"]).await {
+            Ok(result) if result.success => parse_latest_brewery_version(&result.stdout),
+            _ => None,
+        };
 
-    write_cached_latest_brewery_version(fetched_version.clone());
+    if let Ok(mut cache) = LATEST_BREWERY_CACHE.lock() {
+        *cache = Some((SystemTime::now(), fetched_version.clone()));
+    }
     fetched_version
-}
-
-fn read_cached_latest_brewery_version() -> Option<Option<String>> {
-    let cache = LATEST_BREWERY_CACHE.get_or_init(|| Mutex::new(None));
-    let guard = cache.lock().ok()?;
-    let entry = guard.as_ref()?;
-    let age = entry.checked_at.elapsed().ok()?;
-    if age <= LATEST_BREWERY_CACHE_TTL {
-        Some(entry.version.clone())
-    } else {
-        None
-    }
-}
-
-fn write_cached_latest_brewery_version(version: Option<String>) {
-    let cache = LATEST_BREWERY_CACHE.get_or_init(|| Mutex::new(None));
-    if let Ok(mut guard) = cache.lock() {
-        *guard = Some(LatestBreweryCacheEntry {
-            version,
-            checked_at: SystemTime::now(),
-        });
-    }
 }
 
 #[cfg(test)]

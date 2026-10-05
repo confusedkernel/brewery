@@ -38,12 +38,12 @@ pub async fn run_app(
     let mut last_fetched_leaf: Option<String> = None;
 
     // Kick off all startup fetches in parallel (non-blocking)
-    app.request_leaves(&channels.leaves_tx);
-    app.request_casks(&channels.casks_tx);
-    app.request_status(&channels.status_tx);
-    app.request_doctor(&channels.doctor_tx);
-    app.request_sizes(&channels.sizes_tx);
-    app.request_graph(&channels.graph_tx);
+    app.request_leaves(&channels.tx);
+    app.request_casks(&channels.tx);
+    app.request_status(&channels.tx);
+    app.request_doctor(&channels.tx);
+    app.request_sizes(&channels.tx);
+    app.request_graph(&channels.tx);
 
     loop {
         let current_uptime_second = app.started_at.elapsed().as_secs();
@@ -60,14 +60,15 @@ pub async fn run_app(
 
         process_pending_messages(&mut app, &mut channels);
 
-        if !app.pending_command
-            && !app.pending_status
+        if !app.command_job.is_running()
+            && !app.status_job.is_running()
             && app
-                .last_status_check
+                .status_job
+                .finished_at
                 .is_some_and(|last| last.elapsed() >= BACKGROUND_STATUS_REFRESH)
         {
-            app.request_status(&channels.status_tx);
-            app.request_doctor(&channels.doctor_tx);
+            app.request_status(&channels.tx);
+            app.request_doctor(&channels.tx);
         }
 
         // Debounced auto-fetch details for package search results
@@ -75,16 +76,11 @@ pub async fn run_app(
         handle_auto_details(
             &mut app,
             &mut last_fetched_leaf,
-            &channels.details_tx,
+            &channels.tx,
             DETAILS_DEBOUNCE,
         );
 
-        let tick_rate = if app.pending_command
-            || app.pending_leaves
-            || app.pending_casks
-            || app.pending_sizes
-            || app.pending_status
-        {
+        let tick_rate = if app.is_busy() {
             ACTIVE_TICK_RATE
         } else {
             IDLE_TICK_RATE

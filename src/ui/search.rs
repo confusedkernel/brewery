@@ -4,13 +4,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::{App, InputMode};
-use crate::ui::util::icon_label;
+use crate::ui::util::symbol;
 
 pub fn draw_search_panel(frame: &mut ratatui::Frame, area: Rect, app: &App) {
     let theme = &app.theme;
 
-    let search_icon = icon_label(app, "󰍉", "");
-    let installed_label = app.active_kind_label_plural();
+    let search_icon = symbol(app, "󰍉", "");
+    let installed_label = app.active_package_kind.plural();
 
     // Padding (replace with smarter implementation soon)
     let title_prefix = if app.icons_ascii { "" } else { " " };

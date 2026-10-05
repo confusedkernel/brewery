@@ -1,24 +1,21 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Paragraph, Wrap};
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::app::{App, InputMode, PackageAction, StatusTab, ViewMode};
+use crate::app::{App, Confirmation, InputMode, PackageAction, StatusTab, ViewMode};
 use crate::brew::Origin;
 use crate::format::{format_age, format_date, format_size};
-use crate::ui::util::symbol;
+use crate::ui::util::{panel_block, panel_title, styled_line, symbol};
 
 pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_focused: bool) {
     let theme = &app.theme;
 
-    let details_lines = if app.pending_autoremove {
+    let details_lines = if app.pending_confirmation == Some(Confirmation::Autoremove) {
         build_autoremove_preview_lines(app)
-    } else if matches!(
-        app.input_mode,
-        InputMode::PackageSearch | InputMode::PackageResults
-    ) {
+    } else if is_searching(app) {
         build_details_lines(app, app.selected_package_result())
     } else if app.status_tab == StatusTab::Services {
         build_service_details_lines(app)
@@ -29,33 +26,16 @@ pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_
         }
     };
 
-    let border_color = if is_focused {
-        theme.border_active
-    } else {
-        theme.border
-    };
-    let title_modifier = if is_focused {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    };
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(theme.bg_panel))
-        .title(Span::styled(
-            " Details",
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(title_modifier),
-        ));
-
     let visible_lines: Vec<Line> = details_lines
         .into_iter()
         .skip(app.details_scroll_offset)
         .collect();
 
+    let block = panel_block(
+        app,
+        panel_title(" Details", theme.accent, is_focused),
+        is_focused,
+    );
     let paragraph = Paragraph::new(visible_lines)
         .block(block)
         .style(Style::default().bg(theme.bg_panel))
@@ -63,197 +43,138 @@ pub fn draw_details_panel(frame: &mut ratatui::Frame, area: Rect, app: &App, is_
     frame.render_widget(paragraph, area);
 }
 
+fn is_searching(app: &App) -> bool {
+    matches!(
+        app.input_mode,
+        InputMode::PackageSearch | InputMode::PackageResults
+    )
+}
+
+fn heading(text: impl Into<String>, color: Color) -> Line<'static> {
+    Line::from(Span::styled(
+        text.into(),
+        Style::default().fg(color).add_modifier(Modifier::BOLD),
+    ))
+}
+
 fn build_details_lines(app: &App, pkg: Option<&str>) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let Some(pkg) = pkg else {
-        if matches!(
-            app.input_mode,
-            InputMode::PackageSearch | InputMode::PackageResults
-        ) {
-            return vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  No results yet".to_string(),
-                    Style::default().fg(theme.text_muted),
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "  Press Enter to search".to_string(),
-                    Style::default().fg(theme.text_muted),
-                )),
-            ];
-        }
-
+        let (message, hint) = if is_searching(app) {
+            ("  No results yet", "  Press Enter to search")
+        } else {
+            ("  No package selected", "  Select a package from the list")
+        };
         return vec![
             Line::from(""),
-            Line::from(Span::styled(
-                "  No package selected".to_string(),
-                Style::default().fg(theme.text_muted),
-            )),
+            styled_line(message, theme.text_muted),
             Line::from(""),
-            Line::from(Span::styled(
-                "  Select a package from the list".to_string(),
-                Style::default().fg(theme.text_muted),
-            )),
+            styled_line(hint, theme.text_muted),
         ];
     };
 
-    let is_pending = app
-        .pending_details
-        .as_deref()
-        .map(|pending| pending == pkg)
-        .unwrap_or(false);
+    let is_pending = app.pending_details.as_deref() == Some(pkg);
 
-    let mut lines = Vec::new();
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("  {}", pkg),
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
-
+    let mut lines = vec![Line::from(""), heading(format!("  {pkg}"), theme.accent)];
     lines.extend(build_origin_lines(app, pkg));
     lines.extend(build_pinned_lines(app, pkg));
     lines.extend(build_removal_impact_lines(app, pkg));
 
-    if let Some(details) = app.details_cache.peek(pkg) {
-        if let Some(desc) = details.desc.as_ref() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  {}", desc),
-                Style::default().fg(theme.text_primary),
-            )));
-        }
-
-        if let Some(homepage) = details.homepage.as_ref() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Homepage".to_string(),
-                Style::default().fg(theme.text_secondary),
-            )));
-            lines.push(Line::from(Span::styled(
-                format!("  {}", homepage),
-                Style::default().fg(theme.accent),
-            )));
-        }
-
+    let Some(details) = app.details_cache.peek(pkg) else {
         lines.push(Line::from(""));
-
-        let size_text = app
-            .sizes
-            .iter()
-            .find(|e| e.name == pkg)
-            .map(|e| format!(" ({})", format_size(e.size_kb)))
-            .unwrap_or_else(|| {
-                if app.pending_sizes {
-                    " (size: loading...)".to_string()
-                } else {
-                    " (size: n/a)".to_string()
-                }
-            });
-
-        lines.push(Line::from(Span::styled(
-            format!(
-                "  Installed: {}{}",
-                format_list_inline(&details.installed),
-                size_text
-            ),
-            Style::default().fg(theme.green),
-        )));
-
-        if let Some(latest) = details.latest.as_ref() {
-            let is_outdated = if details.artifacts.is_some() {
-                app.is_outdated_cask(pkg)
-            } else {
-                app.is_outdated_leaf(pkg)
-            };
-            if is_outdated {
-                lines.push(Line::from(Span::styled(
-                    format!(
-                        "  Latest: {latest} {} upgrade available (U)",
-                        symbol(app, "↑", "^")
-                    ),
-                    Style::default().fg(theme.orange),
-                )));
-            } else {
-                lines.push(Line::from(Span::styled(
-                    format!("  Latest: {latest}"),
-                    Style::default().fg(theme.text_secondary),
-                )));
-            }
-        }
-
-        if let Some(artifacts) = details.artifacts.as_ref() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  Artifacts ({})", artifacts.len()),
-                Style::default().fg(theme.orange),
-            )));
-            lines.extend(format_list_multiline(app, artifacts, theme, "    "));
-        }
-
-        let is_cask = details.artifacts.is_some();
-
-        if is_cask {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Dependencies: not available for casks".to_string(),
-                Style::default().fg(theme.text_muted),
-            )));
-        } else if let Some(deps) = details.deps.as_ref() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  Dependencies ({})", deps.len()),
-                Style::default().fg(theme.yellow),
-            )));
-            lines.extend(format_list_multiline(app, deps, theme, "    "));
-        } else {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                if is_pending {
-                    "  Dependencies: loading...".to_string()
-                } else {
-                    "  Dependencies: press 'd' to load".to_string()
-                },
-                Style::default().fg(theme.text_muted),
-            )));
-        }
-
-        if is_cask {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "  Used by: not available for casks".to_string(),
-                Style::default().fg(theme.text_muted),
-            )));
-        } else if let Some(uses) = details.uses.as_ref() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("  Used by ({})", uses.len()),
-                Style::default().fg(theme.orange),
-            )));
-            lines.extend(format_list_multiline(app, uses, theme, "    "));
-        } else {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                if is_pending {
-                    "  Used by: loading...".to_string()
-                } else {
-                    "  Used by: press 'd' to load".to_string()
-                },
-                Style::default().fg(theme.text_muted),
-            )));
-        }
-    } else {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
+        lines.push(styled_line(
             if is_pending {
-                "  Loading details...".to_string()
+                "  Loading details..."
             } else {
-                "  Press Enter to load details".to_string()
+                "  Press Enter to load details"
             },
-            Style::default().fg(theme.text_muted),
-        )));
+            theme.text_muted,
+        ));
+        return lines;
+    };
+
+    if let Some(desc) = details.desc.as_ref() {
+        lines.push(Line::from(""));
+        lines.push(styled_line(format!("  {desc}"), theme.text_primary));
+    }
+
+    if let Some(homepage) = details.homepage.as_ref() {
+        lines.push(Line::from(""));
+        lines.push(styled_line("  Homepage", theme.text_secondary));
+        lines.push(styled_line(format!("  {homepage}"), theme.accent));
+    }
+
+    lines.push(Line::from(""));
+
+    let size_text = match app.sizes.iter().find(|entry| entry.name == pkg) {
+        Some(entry) => format!(" ({})", format_size(entry.size_kb)),
+        None if app.sizes_job.is_running() => " (size: loading...)".to_string(),
+        None => " (size: n/a)".to_string(),
+    };
+    lines.push(styled_line(
+        format!(
+            "  Installed: {}{size_text}",
+            format_list_inline(&details.installed)
+        ),
+        theme.green,
+    ));
+
+    // Only casks carry artifacts.
+    let is_cask = details.artifacts.is_some();
+
+    if let Some(latest) = details.latest.as_ref() {
+        let is_outdated = if is_cask {
+            app.is_outdated_cask(pkg)
+        } else {
+            app.is_outdated_leaf(pkg)
+        };
+        lines.push(if is_outdated {
+            styled_line(
+                format!(
+                    "  Latest: {latest} {} upgrade available (U)",
+                    symbol(app, "↑", "^")
+                ),
+                theme.orange,
+            )
+        } else {
+            styled_line(format!("  Latest: {latest}"), theme.text_secondary)
+        });
+    }
+
+    if let Some(artifacts) = details.artifacts.as_ref() {
+        lines.push(Line::from(""));
+        lines.push(styled_line(
+            format!("  Artifacts ({})", artifacts.len()),
+            theme.orange,
+        ));
+        lines.extend(format_list_multiline(app, artifacts));
+    }
+
+    for (label, items, color) in [
+        ("Dependencies", &details.deps, theme.yellow),
+        ("Used by", &details.uses, theme.orange),
+    ] {
+        lines.push(Line::from(""));
+        match items {
+            _ if is_cask => lines.push(styled_line(
+                format!("  {label}: not available for casks"),
+                theme.text_muted,
+            )),
+            Some(items) => {
+                lines.push(styled_line(format!("  {label} ({})", items.len()), color));
+                lines.extend(format_list_multiline(app, items));
+            }
+            None if is_pending => {
+                lines.push(styled_line(
+                    format!("  {label}: loading..."),
+                    theme.text_muted,
+                ));
+            }
+            None => lines.push(styled_line(
+                format!("  {label}: press 'd' to load"),
+                theme.text_muted,
+            )),
+        }
     }
 
     lines
@@ -266,61 +187,48 @@ fn build_origin_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
         return Vec::new();
     };
 
-    let arrow = symbol(app, " ← ", " <- ");
     let mut lines = vec![Line::from("")];
 
     match origin {
         Origin::OnRequest => {
-            lines.push(Line::from(Span::styled(
-                "  Installed on request".to_string(),
-                Style::default().fg(theme.green),
-            )));
+            lines.push(styled_line("  Installed on request", theme.green));
         }
         Origin::RequiredBy {
             path,
             direct_dependents,
         } => {
-            lines.push(Line::from(Span::styled(
-                "  Required by".to_string(),
-                Style::default().fg(theme.text_secondary),
-            )));
+            lines.push(styled_line("  Required by", theme.text_secondary));
 
             // e.g. `zlib ← libpng ← imagemagick`
-            let mut chain = pkg.to_string();
-            for step in &path {
-                chain.push_str(arrow);
-                chain.push_str(step);
-            }
-            lines.push(Line::from(Span::styled(
-                format!("    {chain}"),
-                Style::default().fg(theme.text_primary),
-            )));
+            let arrow = symbol(app, " ← ", " <- ");
+            let chain = std::iter::once(pkg)
+                .chain(path.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(arrow);
+            lines.push(styled_line(format!("    {chain}"), theme.text_primary));
 
             if direct_dependents > 1 {
-                lines.push(Line::from(Span::styled(
+                lines.push(styled_line(
                     format!("    {direct_dependents} formulae depend on it directly"),
-                    Style::default().fg(theme.text_muted),
-                )));
+                    theme.text_muted,
+                ));
             }
         }
         Origin::Orphaned => {
-            lines.push(Line::from(Span::styled(
-                "  Orphaned".to_string(),
-                Style::default().fg(theme.orange),
-            )));
-            lines.push(Line::from(Span::styled(
-                "    Nothing requested needs this; brew autoremove would remove it".to_string(),
-                Style::default().fg(theme.text_muted),
-            )));
+            lines.push(styled_line("  Orphaned", theme.orange));
+            lines.push(styled_line(
+                "    Nothing requested needs this; brew autoremove would remove it",
+                theme.text_muted,
+            ));
         }
         Origin::Unknown => {}
     }
 
     if let Some(installed_at) = app.installed_at(pkg) {
-        lines.push(Line::from(Span::styled(
+        lines.push(styled_line(
             format!("    installed {}", describe_install_time(installed_at)),
-            Style::default().fg(theme.text_muted),
-        )));
+            theme.text_muted,
+        ));
     }
 
     lines
@@ -350,14 +258,11 @@ fn build_pinned_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
 
     vec![
         Line::from(""),
-        Line::from(Span::styled(
-            format!("  {} Pinned", symbol(app, "", "*")),
-            Style::default().fg(theme.yellow),
-        )),
-        Line::from(Span::styled(
-            "    brew upgrade skips it; press p to unpin".to_string(),
-            Style::default().fg(theme.text_muted),
-        )),
+        styled_line(format!("  {} Pinned", symbol(app, "", "*")), theme.yellow),
+        styled_line(
+            "    brew upgrade skips it; press p to unpin",
+            theme.text_muted,
+        ),
     ]
 }
 
@@ -367,39 +272,33 @@ fn build_autoremove_preview_lines(app: &App) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let mut lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            "  Autoremove preview".to_string(),
-            Style::default()
-                .fg(theme.accent_secondary)
-                .add_modifier(Modifier::BOLD),
-        )),
+        heading("  Autoremove preview", theme.accent_secondary),
         Line::from(""),
     ];
 
     let Some(impact) = app.autoremove_impact() else {
-        lines.push(Line::from(Span::styled(
-            "  Dependency graph still loading; confirm to run anyway".to_string(),
-            Style::default().fg(theme.text_muted),
-        )));
+        lines.push(styled_line(
+            "  Dependency graph still loading; confirm to run anyway",
+            theme.text_muted,
+        ));
         return lines;
     };
 
-    let freed = impact
-        .freed_kb
-        .map(|kb| format!(" (~{} freed)", format_size(kb)))
-        .unwrap_or_default();
     let count = impact.orphaned.len();
     let noun = if count == 1 { "formula" } else { "formulae" };
-    lines.push(Line::from(Span::styled(
-        format!("  Removes {count} {noun} nothing requested needs{freed}"),
-        Style::default().fg(theme.orange),
-    )));
-    lines.extend(format_list_multiline(app, &impact.orphaned, theme, "    "));
+    lines.push(styled_line(
+        format!(
+            "  Removes {count} {noun} nothing requested needs{}",
+            freed_suffix(impact.freed_kb)
+        ),
+        theme.orange,
+    ));
+    lines.extend(format_list_multiline(app, &impact.orphaned));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  [a] confirm, [Esc] cancel".to_string(),
-        Style::default().fg(theme.text_secondary),
-    )));
+    lines.push(styled_line(
+        "  [a] confirm, [Esc] cancel",
+        theme.text_secondary,
+    ));
 
     lines
 }
@@ -409,10 +308,11 @@ fn build_autoremove_preview_lines(app: &App) -> Vec<Line<'static>> {
 fn build_removal_impact_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
     let theme = &app.theme;
 
-    let is_awaiting_uninstall = app
-        .pending_package_action
-        .as_ref()
-        .is_some_and(|pending| pending.action == PackageAction::Uninstall && pending.pkg == pkg);
+    let is_awaiting_uninstall = matches!(
+        &app.pending_confirmation,
+        Some(Confirmation::Package(pending))
+            if pending.action == PackageAction::Uninstall && pending.pkg == pkg
+    );
     if !is_awaiting_uninstall {
         return Vec::new();
     }
@@ -424,63 +324,53 @@ fn build_removal_impact_lines(app: &App, pkg: &str) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from("")];
 
     if impact.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "  Nothing else depends on this".to_string(),
-            Style::default().fg(theme.green),
-        )));
+        lines.push(styled_line("  Nothing else depends on this", theme.green));
         return lines;
     }
 
-    let freed = impact
-        .freed_kb
-        .map(|kb| format!(" (~{} freed)", format_size(kb)))
-        .unwrap_or_default();
-
-    lines.push(Line::from(Span::styled(
+    lines.push(styled_line(
         format!(
-            "  Uninstalling also orphans {}{freed}",
-            impact.orphaned.len()
+            "  Uninstalling also orphans {}{}",
+            impact.orphaned.len(),
+            freed_suffix(impact.freed_kb)
         ),
-        Style::default().fg(theme.orange),
-    )));
-    lines.extend(format_list_multiline(app, &impact.orphaned, theme, "    "));
+        theme.orange,
+    ));
+    lines.extend(format_list_multiline(app, &impact.orphaned));
 
     lines
 }
 
+fn freed_suffix(freed_kb: Option<u64>) -> String {
+    freed_kb
+        .map(|kb| format!(" (~{} freed)", format_size(kb)))
+        .unwrap_or_default()
+}
+
 fn build_package_results(app: &App) -> Vec<Line<'static>> {
     let theme = &app.theme;
-    let mut lines = Vec::new();
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "  Search Results".to_string(),
-        Style::default()
-            .fg(theme.accent_secondary)
-            .add_modifier(Modifier::BOLD),
-    )));
+    let mut lines = vec![
+        Line::from(""),
+        heading("  Search Results", theme.accent_secondary),
+        Line::from(""),
+    ];
 
     if app.package_results.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  No results yet".to_string(),
-            Style::default().fg(theme.text_muted),
-        )));
-        lines.push(Line::from(Span::styled(
-            "  Press 'f' to search packages".to_string(),
-            Style::default().fg(theme.text_muted),
-        )));
+        lines.push(styled_line("  No results yet", theme.text_muted));
+        lines.push(styled_line(
+            "  Press 'f' to search packages",
+            theme.text_muted,
+        ));
         return lines;
     }
 
-    lines.push(Line::from(""));
-    for item in app.package_results.iter().take(16) {
-        lines.push(Line::from(Span::styled(
-            format!("  {} {}", symbol(app, "•", "*"), item),
-            Style::default().fg(theme.text_primary),
-        )));
-    }
-
+    let bullet = symbol(app, "•", "*");
+    lines.extend(
+        app.package_results
+            .iter()
+            .take(16)
+            .map(|item| styled_line(format!("  {bullet} {item}"), theme.text_primary)),
+    );
     lines
 }
 
@@ -488,33 +378,25 @@ fn build_service_details_lines(app: &App) -> Vec<Line<'static>> {
     let theme = &app.theme;
     let mut lines = vec![
         Line::from(""),
-        Line::from(Span::styled(
-            "  Service Inspector".to_string(),
-            Style::default()
-                .fg(theme.accent_secondary)
-                .add_modifier(Modifier::BOLD),
-        )),
+        heading("  Service Inspector", theme.accent_secondary),
         Line::from(""),
-        Line::from(Span::styled(
+        styled_line(
             format!("  Filters: {}", app.services_filter_summary()),
-            Style::default().fg(theme.text_muted),
-        )),
-        Line::from(Span::styled(
-            "  Actions: [S] start  [X] stop  [R] restart  [I] info".to_string(),
-            Style::default().fg(theme.text_secondary),
-        )),
-        Line::from(Span::styled(
-            "  Filter keys: [F] failed-only  [A] auto-start-only  [K] kind".to_string(),
-            Style::default().fg(theme.text_secondary),
-        )),
+            theme.text_muted,
+        ),
+        styled_line(
+            "  Actions: [S] start  [X] stop  [R] restart  [I] info",
+            theme.text_secondary,
+        ),
+        styled_line(
+            "  Filter keys: [F] failed-only  [A] auto-start-only  [K] kind",
+            theme.text_secondary,
+        ),
     ];
 
     let Some(service) = app.selected_service_entry() else {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  No service selected".to_string(),
-            Style::default().fg(theme.text_muted),
-        )));
+        lines.push(styled_line("  No service selected", theme.text_muted));
         return lines;
     };
 
@@ -527,67 +409,51 @@ fn build_service_details_lines(app: &App) -> Vec<Line<'static>> {
     };
     let exit_code = service
         .exit_code
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "n/a".to_string());
-    let exit_color = if service.exit_code.is_some_and(|value| value != 0) {
+        .map_or_else(|| "n/a".to_string(), |code| code.to_string());
+    let exit_color = if service.exit_code.is_some_and(|code| code != 0) {
         theme.red
     } else {
         theme.text_secondary
     };
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        format!("  {}", service.name),
-        Style::default()
-            .fg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("  State: {}", service.state_label()),
-        Style::default().fg(state_color),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("  Raw status: {}", service.status),
-        Style::default().fg(theme.text_secondary),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("  Last exit code: {exit_code}"),
-        Style::default().fg(exit_color),
-    )));
-
-    let user_label = service.user.as_deref().unwrap_or("n/a");
-    lines.push(Line::from(Span::styled(
-        format!("  User: {user_label}"),
-        Style::default().fg(theme.text_secondary),
-    )));
-    lines.push(Line::from(Span::styled(
-        format!("  Backend: {}", app.service_backend_label(&service.name)),
-        Style::default().fg(theme.text_secondary),
-    )));
-
     let autostart = if service.auto_start_enabled() {
         "yes"
     } else {
         "no"
     };
-    lines.push(Line::from(Span::styled(
-        format!("  Auto-start: {autostart}"),
-        Style::default().fg(theme.text_secondary),
-    )));
+
+    lines.extend([
+        Line::from(""),
+        heading(format!("  {}", service.name), theme.accent),
+        styled_line(format!("  State: {}", service.state_label()), state_color),
+        styled_line(
+            format!("  Raw status: {}", service.status),
+            theme.text_secondary,
+        ),
+        styled_line(format!("  Last exit code: {exit_code}"), exit_color),
+        styled_line(
+            format!("  User: {}", service.user.as_deref().unwrap_or("n/a")),
+            theme.text_secondary,
+        ),
+        styled_line(
+            format!("  Backend: {}", app.service_backend_label(&service.name)),
+            theme.text_secondary,
+        ),
+        styled_line(format!("  Auto-start: {autostart}"), theme.text_secondary),
+    ]);
 
     if let Some(file) = service.file.as_deref() {
-        lines.push(Line::from(Span::styled(
+        lines.push(styled_line(
             format!("  Unit file: {file}"),
-            Style::default().fg(theme.text_muted),
-        )));
+            theme.text_muted,
+        ));
     }
 
     if service.has_failed() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
+        lines.push(heading(
             format!("  {} Why is this red?", symbol(app, "⚠", "!")),
-            Style::default().fg(theme.red).add_modifier(Modifier::BOLD),
-        )));
+            theme.red,
+        ));
         lines.extend(platform_service_hints(app, &service.name));
     }
 
@@ -595,46 +461,26 @@ fn build_service_details_lines(app: &App) -> Vec<Line<'static>> {
 }
 
 fn platform_service_hints(app: &App, service: &str) -> Vec<Line<'static>> {
-    let theme = &app.theme;
-    let mut lines = Vec::new();
-
-    if cfg!(target_os = "macos") {
-        lines.push(Line::from(Span::styled(
-            format!("    {} brew services info {service}", symbol(app, "•", "*")),
-            Style::default().fg(theme.text_primary),
-        )));
-        lines.push(Line::from(Span::styled(
+    let commands = if cfg!(target_os = "macos") {
+        vec![
+            format!("brew services info {service}"),
+            format!("launchctl print gui/$UID/homebrew.mxcl.{service}"),
             format!(
-                "    {} launchctl print gui/$UID/homebrew.mxcl.{service}",
-                symbol(app, "•", "*")
+                "log show --style compact --predicate 'process CONTAINS \"{service}\"' --last 10m"
             ),
-            Style::default().fg(theme.text_primary),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!(
-                "    {} log show --style compact --predicate 'process CONTAINS \"{service}\"' --last 10m",
-                symbol(app, "•", "*")
-            ),
-            Style::default().fg(theme.text_primary),
-        )));
+        ]
     } else {
-        lines.push(Line::from(Span::styled(
-            format!(
-                "    {} systemctl --user status {service}.service",
-                symbol(app, "•", "*")
-            ),
-            Style::default().fg(theme.text_primary),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!(
-                "    {} journalctl --user-unit {service}.service -n 50 --no-pager",
-                symbol(app, "•", "*")
-            ),
-            Style::default().fg(theme.text_primary),
-        )));
-    }
+        vec![
+            format!("systemctl --user status {service}.service"),
+            format!("journalctl --user-unit {service}.service -n 50 --no-pager"),
+        ]
+    };
 
-    lines
+    let bullet = symbol(app, "•", "*");
+    commands
+        .into_iter()
+        .map(|command| styled_line(format!("    {bullet} {command}"), app.theme.text_primary))
+        .collect()
 }
 
 fn format_list_inline(items: &[String]) -> String {
@@ -644,34 +490,23 @@ fn format_list_inline(items: &[String]) -> String {
     items.join(", ")
 }
 
-fn format_list_multiline(
-    app: &App,
-    items: &[String],
-    theme: &crate::theme::Theme,
-    prefix: &str,
-) -> Vec<Line<'static>> {
+/// One bulleted line per item, indented under a section heading.
+fn format_list_multiline(app: &App, items: &[String]) -> Vec<Line<'static>> {
     if items.is_empty() {
-        return vec![Line::from(Span::styled(
-            format!("{}none", prefix),
-            Style::default().fg(theme.text_muted),
-        ))];
+        return vec![styled_line("    none", app.theme.text_muted)];
     }
 
+    let bullet = symbol(app, "•", "*");
     items
         .iter()
-        .map(|item| {
-            Line::from(Span::styled(
-                format!("{}{} {}", prefix, symbol(app, "•", "*"), item),
-                Style::default().fg(theme.text_primary),
-            ))
-        })
+        .map(|item| styled_line(format!("    {bullet} {item}"), app.theme.text_primary))
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{PackageKind, PendingPackageAction};
+    use crate::app::{Confirmation, PackageKind, PendingPackageAction};
     use crate::brew::{DependencyGraph, FormulaReceipt, Receipts};
 
     fn text(lines: &[Line<'static>]) -> String {
@@ -756,11 +591,11 @@ mod tests {
             "no preview without a pending confirmation"
         );
 
-        app.pending_package_action = Some(PendingPackageAction {
+        app.pending_confirmation = Some(Confirmation::Package(PendingPackageAction {
             action: PackageAction::Uninstall,
             kind: PackageKind::Formula,
             pkg: "imagemagick".to_string(),
-        });
+        }));
 
         let rendered = text(&build_removal_impact_lines(&app, "imagemagick"));
         assert!(rendered.contains("orphans 2"), "got:\n{rendered}");
@@ -835,11 +670,11 @@ mod tests {
     #[test]
     fn does_not_preview_a_cascade_for_a_pending_install() {
         let mut app = app_with_graph();
-        app.pending_package_action = Some(PendingPackageAction {
+        app.pending_confirmation = Some(Confirmation::Package(PendingPackageAction {
             action: PackageAction::Install,
             kind: PackageKind::Formula,
             pkg: "imagemagick".to_string(),
-        });
+        }));
 
         assert!(build_removal_impact_lines(&app, "imagemagick").is_empty());
     }

@@ -5,10 +5,11 @@ mod requests;
 mod state;
 mod types;
 
+pub use requests::MessageTx;
 pub use types::{
-    CommandHistoryEntry, FocusedPanel, IconMode, InputMode, PackageAction, PackageKind,
-    PendingPackageAction, PendingServiceAction, ServiceAction, ServiceKindFilter, SortMode,
-    StatusTab, Toast, ToastLevel, ViewMode,
+    CommandHistoryEntry, Confirmation, FocusedPanel, InputMode, Job, Message, PackageAction,
+    PackageKind, PendingPackageAction, PendingServiceAction, ServiceAction, ServiceKindFilter,
+    SortMode, StatusTab, Toast, ToastLevel, ViewMode,
 };
 
 use std::collections::{HashSet, VecDeque};
@@ -18,11 +19,9 @@ use std::time::{Duration, Instant};
 use lru::LruCache;
 
 use crate::brew::{
-    CasksMessage, CommandKind, CommandMessage, DependencyGraph, Details, DetailsLoad,
-    DetailsMessage, DoctorMessage, DoctorReport, GraphMessage, LeavesMessage, SizeEntry,
-    SizesMessage, StatusMessage, StatusSnapshot, fetch_casks, fetch_dependency_graph,
-    fetch_details_basic, fetch_details_full, fetch_doctor, fetch_leaves, fetch_sizes, fetch_status,
-    run_command,
+    CommandKind, DependencyGraph, Details, DetailsLoad, DoctorReport, SizeEntry, StatusSnapshot,
+    fetch_casks, fetch_dependency_graph, fetch_details_basic, fetch_details_full, fetch_doctor,
+    fetch_leaves, fetch_sizes, fetch_status, run_command,
 };
 use crate::theme::{Theme, ThemeMode, detect_system_theme};
 
@@ -50,9 +49,11 @@ pub struct App {
     /// Every installed formula, which is where dependency provenance gets
     /// interesting.
     pub all_formulae: Vec<String>,
+    pub leaves_job: Job,
     pub leaves_only: bool,
     pub sort_mode: SortMode,
     pub casks: Vec<String>,
+    pub casks_job: Job,
     pub filtered_leaves: Vec<usize>,
     pub filtered_casks: Vec<usize>,
     /// Every outdated formula, whichever scope is showing.
@@ -60,9 +61,7 @@ pub struct App {
     pub outdated_casks: HashSet<String>,
     /// Formulae held back from `brew upgrade` via `brew pin`.
     pub pinned: HashSet<String>,
-    pub filtered_leaves_dirty: bool,
     pub package_results_selected: Option<usize>,
-    pub last_package_search: Option<String>,
     pub last_result_details_pkg: Option<String>,
     pub selected_index: Option<usize>,
     pub selected_cask_index: Option<usize>,
@@ -71,35 +70,19 @@ pub struct App {
     pub package_results: Vec<String>,
     pub view_mode: ViewMode,
     pub sizes: Vec<SizeEntry>,
-    pub pending_sizes: bool,
-    pub icon_mode: IconMode,
+    pub sizes_job: Job,
     pub icons_ascii: bool,
     pub mouse_enabled: bool,
-    pub pending_command: bool,
+    pub command_job: Job,
     pub last_command: Option<CommandKind>,
     pub last_command_target: Option<String>,
-    pub last_command_target_is_cask: bool,
-    pub command_started_at: Option<Instant>,
     pub last_command_completed: Option<(CommandKind, String, Instant)>,
     pub last_command_output: Vec<String>,
     pub last_command_error: Option<String>,
     pub last_error: Option<String>,
-    pub pending_package_action: Option<PendingPackageAction>,
-    pub pending_service_action: Option<PendingServiceAction>,
-    pub pending_upgrade_all_outdated: bool,
-    pub pending_autoremove: bool,
-    pub pending_self_update: bool,
+    pub pending_confirmation: Option<Confirmation>,
     pub command_history: VecDeque<CommandHistoryEntry>,
     pub last_command_args: Vec<String>,
-    pub pending_leaves: bool,
-    pub pending_casks: bool,
-    pub pending_leaves_started_at: Option<Instant>,
-    pub pending_casks_started_at: Option<Instant>,
-    pub pending_sizes_started_at: Option<Instant>,
-    pub pending_status_started_at: Option<Instant>,
-    pub last_leaves_refresh: Option<Instant>,
-    pub last_casks_refresh: Option<Instant>,
-    pub last_sizes_refresh: Option<Instant>,
     pub focus_panel: FocusedPanel,
     pub sizes_scroll_offset: usize,
     pub details_scroll_offset: usize,
@@ -107,14 +90,13 @@ pub struct App {
     /// Installed dependency graph, backing "why do I have this?" and the
     /// uninstall impact preview.
     pub dependency_graph: Option<DependencyGraph>,
-    pub pending_graph: bool,
+    pub graph_job: Job,
     pub system_status: Option<StatusSnapshot>,
-    pub pending_status: bool,
+    pub status_job: Job,
     /// `brew doctor`, on its own clock. Fills in after the rest of the status
     /// panel rather than holding it up.
     pub doctor: Option<DoctorReport>,
-    pub pending_doctor: bool,
-    pub last_status_check: Option<Instant>,
+    pub doctor_job: Job,
     pub status_tab: StatusTab,
     pub services_selected_index: Option<usize>,
     pub services_failed_only: bool,

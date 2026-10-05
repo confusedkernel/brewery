@@ -1,176 +1,90 @@
+use std::time::Duration;
+
 use tokio::sync::mpsc;
 
-use crate::app::{App, InputMode};
-use crate::brew::{CommandKind, DetailsLoad, LeavesMessage};
+use crate::app::{App, InputMode, Message, MessageTx};
+use crate::brew::{CommandKind, DetailsLoad};
 
 pub struct RuntimeChannels {
-    pub leaves_tx: mpsc::UnboundedSender<LeavesMessage>,
-    pub casks_tx: mpsc::UnboundedSender<crate::brew::CasksMessage>,
-    pub details_tx: mpsc::UnboundedSender<crate::brew::DetailsMessage>,
-    pub sizes_tx: mpsc::UnboundedSender<crate::brew::SizesMessage>,
-    pub command_tx: mpsc::UnboundedSender<crate::brew::CommandMessage>,
-    pub status_tx: mpsc::UnboundedSender<crate::brew::StatusMessage>,
-    pub graph_tx: mpsc::UnboundedSender<crate::brew::GraphMessage>,
-    pub doctor_tx: mpsc::UnboundedSender<crate::brew::DoctorMessage>,
-    pub leaves_rx: mpsc::UnboundedReceiver<LeavesMessage>,
-    pub casks_rx: mpsc::UnboundedReceiver<crate::brew::CasksMessage>,
-    pub details_rx: mpsc::UnboundedReceiver<crate::brew::DetailsMessage>,
-    pub sizes_rx: mpsc::UnboundedReceiver<crate::brew::SizesMessage>,
-    pub command_rx: mpsc::UnboundedReceiver<crate::brew::CommandMessage>,
-    pub status_rx: mpsc::UnboundedReceiver<crate::brew::StatusMessage>,
-    pub graph_rx: mpsc::UnboundedReceiver<crate::brew::GraphMessage>,
-    pub doctor_rx: mpsc::UnboundedReceiver<crate::brew::DoctorMessage>,
+    pub tx: MessageTx,
+    pub rx: mpsc::UnboundedReceiver<Message>,
 }
 
 pub fn create_channels() -> RuntimeChannels {
-    let (leaves_tx, leaves_rx) = mpsc::unbounded_channel::<LeavesMessage>();
-    let (casks_tx, casks_rx) = mpsc::unbounded_channel();
-    let (details_tx, details_rx) = mpsc::unbounded_channel();
-    let (sizes_tx, sizes_rx) = mpsc::unbounded_channel();
-    let (command_tx, command_rx) = mpsc::unbounded_channel();
-    let (status_tx, status_rx) = mpsc::unbounded_channel();
-    let (graph_tx, graph_rx) = mpsc::unbounded_channel();
-    let (doctor_tx, doctor_rx) = mpsc::unbounded_channel();
-
-    RuntimeChannels {
-        leaves_tx,
-        casks_tx,
-        details_tx,
-        sizes_tx,
-        command_tx,
-        status_tx,
-        graph_tx,
-        doctor_tx,
-        leaves_rx,
-        casks_rx,
-        details_rx,
-        sizes_rx,
-        command_rx,
-        status_rx,
-        graph_rx,
-        doctor_rx,
-    }
+    let (tx, rx) = mpsc::unbounded_channel();
+    RuntimeChannels { tx, rx }
 }
 
 pub fn process_pending_messages(app: &mut App, channels: &mut RuntimeChannels) {
-    let mut received_message = false;
+    while let Ok(message) = channels.rx.try_recv() {
+        let Message::Command { kind, result } = &message else {
+            app.apply_message(message);
+            continue;
+        };
 
-    while let Ok(message) = channels.leaves_rx.try_recv() {
-        app.apply_leaves_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.casks_rx.try_recv() {
-        app.apply_casks_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.details_rx.try_recv() {
-        app.apply_details_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.sizes_rx.try_recv() {
-        app.apply_sizes_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.command_rx.try_recv() {
-        let mut should_refresh_leaves = false;
-        let mut should_refresh_status = false;
-        let mut refresh_details_pkg = None;
-        if let Ok(result) = &message.result
-            && result.success
-        {
-            should_refresh_leaves = message.kind.refreshes_lists_on_success();
-            should_refresh_status = message.kind.refreshes_status_on_success();
-            if message.kind == CommandKind::Upgrade {
-                refresh_details_pkg = app.last_command_target.clone();
-            }
-        }
-        app.apply_command_message(message);
-        if should_refresh_leaves {
-            app.request_leaves(&channels.leaves_tx);
-            app.request_casks(&channels.casks_tx);
+        let kind = *kind;
+        let succeeded = result.as_ref().is_ok_and(|result| result.success);
+        let upgraded_pkg = app
+            .last_command_target
+            .clone()
+            .filter(|_| succeeded && kind == CommandKind::Upgrade);
+        app.apply_message(message);
+
+        if succeeded && kind.refreshes_lists_on_success() {
+            app.request_leaves(&channels.tx);
+            app.request_casks(&channels.tx);
             // Anything that adds or removes kegs invalidates the graph.
-            app.request_graph(&channels.graph_tx);
+            app.request_graph(&channels.tx);
         }
-        if should_refresh_status {
-            app.request_status(&channels.status_tx);
-            app.request_doctor(&channels.doctor_tx);
+        if succeeded && kind.refreshes_status_on_success() {
+            app.request_status(&channels.tx);
+            app.request_doctor(&channels.tx);
         }
-        if let Some(pkg) = refresh_details_pkg {
-            app.request_details_forced(&pkg, DetailsLoad::Basic, &channels.details_tx);
+        if let Some(pkg) = upgraded_pkg {
+            app.request_details_forced(&pkg, DetailsLoad::Basic, &channels.tx);
         }
-        received_message = true;
-    }
-    while let Ok(message) = channels.status_rx.try_recv() {
-        app.apply_status_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.graph_rx.try_recv() {
-        app.apply_graph_message(message);
-        received_message = true;
-    }
-    while let Ok(message) = channels.doctor_rx.try_recv() {
-        app.apply_doctor_message(message);
-        received_message = true;
-    }
-
-    if received_message {
-        app.needs_redraw = true;
     }
 }
 
+/// Loads basic details for whatever is selected once the selection has
+/// settled, so scrolling through a list does not fire a request per row.
 pub fn handle_auto_details(
     app: &mut App,
     last_fetched_leaf: &mut Option<String>,
-    details_tx: &mpsc::UnboundedSender<crate::brew::DetailsMessage>,
-    debounce: std::time::Duration,
+    tx: &MessageTx,
+    debounce: Duration,
 ) {
-    if matches!(
-        app.input_mode,
-        InputMode::PackageSearch | InputMode::PackageResults
-    ) && let Some(pkg) = app.selected_package_result().map(str::to_string)
-    {
-        let already_fetched = app.last_result_details_pkg.as_deref() == Some(pkg.as_str());
-        let debounce_elapsed = app
+    let settled = app.pending_details.is_none()
+        && !app.is_rapid_scrolling()
+        && app
             .last_selection_change
-            .map(|t| t.elapsed() >= debounce)
-            .unwrap_or(true);
-        let not_pending = app.pending_details.is_none();
-        let not_scrolling = !app.is_rapid_scrolling();
-
-        if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
-            app.request_details_for(&pkg, DetailsLoad::Basic, details_tx);
-            app.last_result_details_pkg = Some(pkg);
-        }
+            .is_none_or(|changed| changed.elapsed() >= debounce);
+    if !settled {
+        return;
     }
 
-    if !matches!(
+    let searching = matches!(
         app.input_mode,
         InputMode::PackageSearch | InputMode::PackageResults
-    ) {
-        let selected = app.selected_installed_package().map(str::to_string);
-        if let Some(ref pkg) = selected {
-            let already_fetched = last_fetched_leaf.as_ref() == Some(pkg);
-            let debounce_elapsed = app
-                .last_selection_change
-                .map(|t| t.elapsed() >= debounce)
-                .unwrap_or(true);
-            let not_pending = app.pending_details.is_none();
-            let not_scrolling = !app.is_rapid_scrolling();
-
-            if !already_fetched && debounce_elapsed && not_pending && not_scrolling {
-                app.request_details(DetailsLoad::Basic, details_tx);
-                *last_fetched_leaf = selected.clone();
-            }
-        }
-    }
-}
-
-pub fn handle_focus_backtab(app: &mut App) {
-    app.focus_panel = match app.focus_panel {
-        crate::app::FocusedPanel::Leaves => crate::app::FocusedPanel::Details,
-        crate::app::FocusedPanel::Sizes => crate::app::FocusedPanel::Leaves,
-        crate::app::FocusedPanel::Status => crate::app::FocusedPanel::Sizes,
-        crate::app::FocusedPanel::Details => crate::app::FocusedPanel::Status,
+    );
+    let selected = if searching {
+        app.selected_package_result()
+    } else {
+        app.selected_installed_package()
     };
-    app.set_focus_status();
+    let Some(pkg) = selected.map(str::to_string) else {
+        return;
+    };
+
+    let last_fetched = if searching {
+        &mut app.last_result_details_pkg
+    } else {
+        last_fetched_leaf
+    };
+    if last_fetched.as_deref() == Some(pkg.as_str()) {
+        return;
+    }
+
+    *last_fetched = Some(pkg.clone());
+    app.request_details_for(&pkg, DetailsLoad::Basic, tx);
 }

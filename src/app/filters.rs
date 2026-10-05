@@ -165,10 +165,6 @@ impl App {
             .collect()
     }
 
-    pub fn filtered_service_count(&self) -> usize {
-        self.filtered_service_indices().len()
-    }
-
     pub fn select_next_service(&mut self) {
         self.step_service_selection(StepDirection::Next);
     }
@@ -253,35 +249,25 @@ impl App {
     }
 
     pub fn select_next_result(&mut self) {
-        if self.package_results.is_empty() {
-            self.package_results_selected = None;
-            return;
-        }
-        step_linear_selection(
-            self.package_results.len(),
-            &mut self.package_results_selected,
-            StepDirection::Next,
-        );
-        self.last_result_details_pkg = None;
+        self.step_result_selection(StepDirection::Next);
     }
 
     pub fn select_prev_result(&mut self) {
-        if self.package_results.is_empty() {
-            self.package_results_selected = None;
-            return;
+        self.step_result_selection(StepDirection::Prev);
+    }
+
+    fn step_result_selection(&mut self, direction: StepDirection) {
+        let len = self.package_results.len();
+        self.package_results_selected =
+            (len > 0).then(|| step_position(self.package_results_selected, len, direction));
+        if len > 0 {
+            self.last_result_details_pkg = None;
         }
-        step_linear_selection(
-            self.package_results.len(),
-            &mut self.package_results_selected,
-            StepDirection::Prev,
-        );
-        self.last_result_details_pkg = None;
     }
 
     pub fn clear_package_results(&mut self) {
         self.package_results.clear();
         self.package_results_selected = None;
-        self.last_package_search = None;
         self.last_result_details_pkg = None;
     }
 
@@ -299,8 +285,6 @@ impl App {
     }
 
     pub fn update_filtered_leaves(&mut self) {
-        self.filtered_leaves_dirty = false;
-
         self.filtered_leaves = build_filtered_indices(&self.leaves, &self.leaves_query, |item| {
             !self.leaves_outdated_only || self.is_outdated_leaf(item)
         });
@@ -319,37 +303,20 @@ impl App {
     }
 
     pub fn select_next(&mut self) {
-        if self.is_cask_mode() {
-            step_filtered_selection(
-                &self.filtered_casks,
-                &mut self.selected_cask_index,
-                StepDirection::Next,
-            );
-            return;
-        }
-
-        step_filtered_selection(
-            &self.filtered_leaves,
-            &mut self.selected_index,
-            StepDirection::Next,
-        );
+        self.step_installed_selection(StepDirection::Next);
     }
 
     pub fn select_prev(&mut self) {
-        if self.is_cask_mode() {
-            step_filtered_selection(
-                &self.filtered_casks,
-                &mut self.selected_cask_index,
-                StepDirection::Prev,
-            );
-            return;
-        }
+        self.step_installed_selection(StepDirection::Prev);
+    }
 
-        step_filtered_selection(
-            &self.filtered_leaves,
-            &mut self.selected_index,
-            StepDirection::Prev,
-        );
+    fn step_installed_selection(&mut self, direction: StepDirection) {
+        let (filtered, selected) = if self.is_cask_mode() {
+            (&self.filtered_casks, &mut self.selected_cask_index)
+        } else {
+            (&self.filtered_leaves, &mut self.selected_index)
+        };
+        *selected = step_filtered(filtered, *selected, direction);
     }
 
     pub fn update_filtered_casks(&mut self) {
@@ -359,18 +326,13 @@ impl App {
 
     fn step_service_selection(&mut self, direction: StepDirection) {
         let filtered = self.filtered_service_indices();
-        if filtered.is_empty() {
-            self.services_selected_index = None;
-            self.status_scroll_offset = 0;
-            return;
-        }
-
-        let current_pos = self
+        self.services_selected_index =
+            step_filtered(&filtered, self.services_selected_index, direction);
+        // The services tab scrolls with its selection, one line per service.
+        self.status_scroll_offset = self
             .services_selected_index
-            .and_then(|selected| filtered.iter().position(|candidate| *candidate == selected));
-        let next_pos = step_position(current_pos, filtered.len(), direction);
-        self.services_selected_index = filtered.get(next_pos).copied();
-        self.status_scroll_offset = next_pos;
+            .and_then(|selected| filtered.iter().position(|idx| *idx == selected))
+            .unwrap_or(0);
     }
 
     fn service_matches_filters(&self, service: &ServiceEntry) -> bool {
@@ -444,30 +406,22 @@ fn reconcile_selection(filtered: &[usize], selected: &mut Option<usize>) {
     *selected = filtered.first().copied();
 }
 
-fn step_filtered_selection(
+/// Moves a selection of absolute indices one step through the filtered
+/// subset, landing on its first entry when nothing visible was selected.
+fn step_filtered(
     filtered: &[usize],
-    selected: &mut Option<usize>,
+    selected: Option<usize>,
     direction: StepDirection,
-) {
-    if filtered.is_empty() {
-        *selected = None;
-        return;
-    }
-
+) -> Option<usize> {
     let current_pos =
         selected.and_then(|idx| filtered.iter().position(|candidate| *candidate == idx));
     let next_pos = step_position(current_pos, filtered.len(), direction);
-    *selected = filtered.get(next_pos).copied();
-}
-
-fn step_linear_selection(len: usize, selected: &mut Option<usize>, direction: StepDirection) {
-    let next = step_position(*selected, len, direction);
-    *selected = Some(next);
+    filtered.get(next_pos).copied()
 }
 
 fn step_position(current: Option<usize>, len: usize, direction: StepDirection) -> usize {
     match direction {
-        StepDirection::Next => current.map_or(0, |idx| (idx + 1).min(len - 1)),
+        StepDirection::Next => current.map_or(0, |idx| (idx + 1).min(len.saturating_sub(1))),
         StepDirection::Prev => current.map_or(0, |idx| idx.saturating_sub(1)),
     }
 }

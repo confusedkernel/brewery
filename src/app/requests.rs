@@ -4,28 +4,19 @@ use tokio::sync::mpsc;
 
 use super::*;
 
+pub type MessageTx = mpsc::UnboundedSender<Message>;
+
 impl App {
-    pub fn request_leaves(&mut self, tx: &mpsc::UnboundedSender<LeavesMessage>) {
-        if self.pending_leaves {
+    pub fn request_leaves(&mut self, tx: &MessageTx) {
+        if !self.leaves_job.start() {
             return;
         }
 
-        self.pending_leaves = true;
-        self.pending_leaves_started_at = Some(Instant::now());
-        set_request_status(self, "Loading leaves...", true);
-
-        spawn_request(tx, async {
-            LeavesMessage {
-                result: fetch_leaves().await,
-            }
-        });
+        self.set_request_status("Loading leaves...");
+        spawn_request(tx, async { Message::Leaves(fetch_leaves().await) });
     }
 
-    pub fn request_details(
-        &mut self,
-        load: DetailsLoad,
-        tx: &mpsc::UnboundedSender<DetailsMessage>,
-    ) {
+    pub fn request_details(&mut self, load: DetailsLoad, tx: &MessageTx) {
         let Some(pkg) = self.selected_installed_package().map(str::to_string) else {
             return;
         };
@@ -33,201 +24,134 @@ impl App {
         self.request_details_for(&pkg, load, tx);
     }
 
-    pub fn request_details_for(
-        &mut self,
-        pkg: &str,
-        load: DetailsLoad,
-        tx: &mpsc::UnboundedSender<DetailsMessage>,
-    ) {
-        self.request_details_for_inner(pkg, load, tx, false);
+    pub fn request_details_for(&mut self, pkg: &str, load: DetailsLoad, tx: &MessageTx) {
+        self.request_details_inner(pkg, load, tx, false);
     }
 
-    pub fn request_details_forced(
-        &mut self,
-        pkg: &str,
-        load: DetailsLoad,
-        tx: &mpsc::UnboundedSender<DetailsMessage>,
-    ) {
-        self.request_details_for_inner(pkg, load, tx, true);
+    pub fn request_details_forced(&mut self, pkg: &str, load: DetailsLoad, tx: &MessageTx) {
+        self.request_details_inner(pkg, load, tx, true);
     }
 
-    fn request_details_for_inner(
-        &mut self,
-        pkg: &str,
-        load: DetailsLoad,
-        tx: &mpsc::UnboundedSender<DetailsMessage>,
-        force: bool,
-    ) {
-        let pkg = pkg.to_string();
-
-        if let Some(pending) = self.pending_details.as_ref()
-            && pending == &pkg
-        {
+    fn request_details_inner(&mut self, pkg: &str, load: DetailsLoad, tx: &MessageTx, force: bool) {
+        if self.pending_details.as_deref() == Some(pkg) {
             return;
         }
 
-        if !force && let Some(existing) = self.details_cache.get(&pkg) {
-            match load {
-                DetailsLoad::Basic => return,
-                DetailsLoad::Full => {
-                    if existing.deps.is_some() && existing.uses.is_some() {
-                        return;
-                    }
-                }
+        if !force && let Some(existing) = self.details_cache.get(pkg) {
+            let has_everything = match load {
+                DetailsLoad::Basic => true,
+                DetailsLoad::Full => existing.deps.is_some() && existing.uses.is_some(),
+            };
+            if has_everything {
+                return;
             }
         }
 
+        let pkg = pkg.to_string();
         self.pending_details = Some(pkg.clone());
-        set_request_status(
-            self,
-            match load {
-                DetailsLoad::Basic => "Loading details...",
-                DetailsLoad::Full => "Loading deps/uses...",
-            },
-            false,
-        );
+        // Details load on every selection change, so they update the status
+        // line without forcing a redraw of their own.
+        self.status = match load {
+            DetailsLoad::Basic => "Loading details...",
+            DetailsLoad::Full => "Loading deps/uses...",
+        }
+        .to_string();
+        self.last_refresh = Instant::now();
 
         spawn_request(tx, async move {
             let result = match load {
                 DetailsLoad::Basic => fetch_details_basic(&pkg).await,
                 DetailsLoad::Full => fetch_details_full(&pkg).await,
             };
-            DetailsMessage { pkg, load, result }
+            Message::Details { pkg, load, result }
         });
     }
 
-    pub fn request_sizes(&mut self, tx: &mpsc::UnboundedSender<SizesMessage>) {
-        if self.pending_sizes {
+    pub fn request_sizes(&mut self, tx: &MessageTx) {
+        if !self.sizes_job.start() {
             return;
         }
 
-        self.pending_sizes = true;
-        self.pending_sizes_started_at = Some(Instant::now());
-        set_request_status(self, "Loading sizes...", true);
-
-        spawn_request(tx, async {
-            SizesMessage {
-                result: fetch_sizes().await,
-            }
-        });
+        self.set_request_status("Loading sizes...");
+        spawn_request(tx, async { Message::Sizes(fetch_sizes().await) });
     }
 
-    pub fn request_casks(&mut self, tx: &mpsc::UnboundedSender<CasksMessage>) {
-        if self.pending_casks {
+    pub fn request_casks(&mut self, tx: &MessageTx) {
+        if !self.casks_job.start() {
             return;
         }
 
-        self.pending_casks = true;
-        self.pending_casks_started_at = Some(Instant::now());
-        set_request_status(self, "Loading casks...", true);
-
-        spawn_request(tx, async {
-            CasksMessage {
-                result: fetch_casks().await,
-            }
-        });
+        self.set_request_status("Loading casks...");
+        spawn_request(tx, async { Message::Casks(fetch_casks().await) });
     }
 
-    pub fn request_graph(&mut self, tx: &mpsc::UnboundedSender<GraphMessage>) {
-        if self.pending_graph {
+    pub fn request_graph(&mut self, tx: &MessageTx) {
+        if !self.graph_job.start() {
             return;
         }
 
-        self.pending_graph = true;
-
-        spawn_request(tx, async {
-            GraphMessage {
-                result: fetch_dependency_graph().await,
-            }
-        });
+        spawn_request(tx, async { Message::Graph(fetch_dependency_graph().await) });
     }
 
-    pub fn request_status(&mut self, tx: &mpsc::UnboundedSender<StatusMessage>) {
-        if self.pending_status {
+    pub fn request_status(&mut self, tx: &MessageTx) {
+        if !self.status_job.start() {
             return;
         }
 
-        self.pending_status = true;
-        self.pending_status_started_at = Some(Instant::now());
-        set_request_status(self, "Checking status...", true);
-
+        self.set_request_status("Checking status...");
         let known_leaves = (!self.leaf_formulae.is_empty()).then(|| self.leaf_formulae.clone());
         spawn_request(tx, async move {
-            StatusMessage {
-                result: fetch_status(known_leaves).await,
-            }
+            Message::Status(fetch_status(known_leaves).await)
         });
     }
 
     /// Deliberately quiet: no status-line text and no spinner. The doctor run
     /// outlives the rest of the status check, and announcing it would put the
     /// panel back to looking busy for the second it saves.
-    pub fn request_doctor(&mut self, tx: &mpsc::UnboundedSender<DoctorMessage>) {
-        if self.pending_doctor {
+    pub fn request_doctor(&mut self, tx: &MessageTx) {
+        if !self.doctor_job.start() {
             return;
         }
 
-        self.pending_doctor = true;
-
-        spawn_request(tx, async {
-            DoctorMessage {
-                result: fetch_doctor().await,
-            }
-        });
+        spawn_request(tx, async { Message::Doctor(fetch_doctor().await) });
     }
 
-    pub fn request_command(
-        &mut self,
-        kind: CommandKind,
-        args: &[&str],
-        tx: &mpsc::UnboundedSender<CommandMessage>,
-    ) {
-        if self.pending_command {
+    pub fn request_command(&mut self, kind: CommandKind, args: &[&str], tx: &MessageTx) {
+        if !self.command_job.start() {
             return;
         }
 
-        self.pending_command = true;
         self.last_command = Some(kind);
         self.last_command_target = if kind.has_named_target() {
             args.last().map(|value| (*value).to_string())
         } else {
             None
         };
-        self.last_command_target_is_cask = kind.is_package_action() && args.contains(&"--cask");
-        self.command_started_at = Some(Instant::now());
         self.last_command_args = args.iter().map(|arg| (*arg).to_string()).collect();
         self.last_command_output.clear();
         self.last_command_error = None;
-        self.status = format!("Running {kind}...");
-        self.last_refresh = Instant::now();
-        self.needs_redraw = true;
+        self.set_request_status(format!("Running {kind}..."));
 
-        let tx = tx.clone();
-        let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
-        tokio::spawn(async move {
+        let args = self.last_command_args.clone();
+        spawn_request(tx, async move {
             let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
             let result = run_command(kind.binary(), &arg_refs).await;
-            let _ = tx.send(CommandMessage { kind, result });
+            Message::Command { kind, result }
         });
     }
-}
 
-fn set_request_status(app: &mut App, status: &str, needs_redraw: bool) {
-    app.status = status.to_string();
-    app.last_refresh = Instant::now();
-    if needs_redraw {
-        app.needs_redraw = true;
+    fn set_request_status(&mut self, status: impl Into<String>) {
+        self.set_status(status);
+        self.needs_redraw = true;
     }
 }
 
-fn spawn_request<Message, Fut>(tx: &mpsc::UnboundedSender<Message>, task: Fut)
+fn spawn_request<Fut>(tx: &MessageTx, task: Fut)
 where
-    Message: Send + 'static,
     Fut: Future<Output = Message> + Send + 'static,
 {
     let tx = tx.clone();
     tokio::spawn(async move {
-        let message = task.await;
-        let _ = tx.send(message);
+        let _ = tx.send(task.await);
     });
 }

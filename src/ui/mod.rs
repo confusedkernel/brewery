@@ -14,12 +14,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::app::{App, FocusedPanel, StatusTab};
+use crate::app::{App, FocusedPanel};
 use crate::theme::ThemeMode;
 
-pub fn status_tab_at_column(app: &App, area: Rect, column: u16) -> Option<StatusTab> {
-    status::tab_at_column(app, area, column)
-}
+pub use status::{item_count as status_item_count, tab_at_column as status_tab_at_column};
 
 pub fn draw(frame: &mut ratatui::Frame, app: &App) {
     let theme = &app.theme;
@@ -49,23 +47,17 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App, dimmed: bool) 
         ThemeMode::Dark => "dark",
     };
 
-    let mut version_label = format!("v{current_version}");
-    if let Some(status) = app.system_status.as_ref()
-        && status.brewery_update_available
-        && let Some(latest) = status.brewery_latest_version.as_ref()
-    {
-        version_label = format!("v{current_version} (update: v{latest})");
-    }
-
-    let version_color = if app
+    let available_update = app
         .system_status
         .as_ref()
-        .map(|status| status.brewery_update_available)
-        .unwrap_or(false)
-    {
-        theme.orange
-    } else {
-        theme.text_muted
+        .filter(|status| status.brewery_update_available)
+        .and_then(|status| status.brewery_latest_version.as_ref());
+    let (version_label, version_color) = match available_update {
+        Some(latest) => (
+            format!("v{current_version} (update: v{latest})"),
+            theme.orange,
+        ),
+        None => (format!("v{current_version}"), theme.text_muted),
     };
 
     let line = Line::from(vec![
@@ -94,29 +86,11 @@ fn draw_header(frame: &mut ratatui::Frame, area: Rect, app: &App, dimmed: bool) 
 }
 
 fn draw_body(frame: &mut ratatui::Frame, app: &App, layout: layout::AppLayout) {
+    let focused = |panel| app.focus_panel == panel;
+
     search::draw_search_panel(frame, layout.search, app);
-    leaves::draw_leaves_panel(
-        frame,
-        layout.leaves,
-        app,
-        app.focus_panel == FocusedPanel::Leaves,
-    );
-    sizes::draw_sizes_panel(
-        frame,
-        layout.sizes,
-        app,
-        app.focus_panel == FocusedPanel::Sizes,
-    );
-    status::draw_status_panel(
-        frame,
-        layout.status,
-        app,
-        app.focus_panel == FocusedPanel::Status,
-    );
-    details::draw_details_panel(
-        frame,
-        layout.details,
-        app,
-        app.focus_panel == FocusedPanel::Details,
-    );
+    leaves::draw_leaves_panel(frame, layout.leaves, app, focused(FocusedPanel::Leaves));
+    sizes::draw_sizes_panel(frame, layout.sizes, app, focused(FocusedPanel::Sizes));
+    status::draw_status_panel(frame, layout.status, app, focused(FocusedPanel::Status));
+    details::draw_details_panel(frame, layout.details, app, focused(FocusedPanel::Details));
 }
